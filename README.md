@@ -141,4 +141,4 @@ a runnable single-repo example. Planned: a multi-repo workspace profile.
 
 Versions and breaking changes live in `CHANGELOG.md`.
 
-MIT licensed. See `LICENSE`.
+BSD 2-Clause licensed. See `LICENSE`.

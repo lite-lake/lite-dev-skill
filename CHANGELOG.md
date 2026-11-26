@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- License changed from MIT to BSD 2-Clause. Updates `LICENSE`, the `license`
+  field in `skills/lite-dev/SKILL.md`, and the license line in `README.md` and
+  `README.zh.md`. No code or protocol change.
+
 ## Packaging — lite-dev-skill
 
 - The distribution repository is <https://github.com/lite-lake/lite-dev-skill>.

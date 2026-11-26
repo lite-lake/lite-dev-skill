@@ -92,4 +92,4 @@ flow.py extensions                     # 每个扩展加了什么
 
 版本与破坏性变更见 `CHANGELOG.md`。
 
-MIT。
+BSD 2-Clause。

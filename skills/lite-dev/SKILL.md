@@ -1,7 +1,7 @@
 ---
 name: lite-dev
 description: Agent-first development flow for software projects. Use when implementing, fixing, designing, or releasing a change; creating or resuming a work item; deciding whether a change needs a design; running a gate; or verifying acceptance criteria. Triggers include "implement", "fix", "design", "release", "continue the work item", "run the gate".
-license: MIT
+license: BSD-2-Clause
 ---
 
 # lite-dev
