@@ -29,6 +29,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -487,7 +488,11 @@ def cmd_status(args) -> int:
         control = profile.control_path or "."
         print(f"  control {control}")
         print(f"  repos   {_repo_line(repo_states)}")
-        missing = [state["path"] for state in repo_states if not state["present"]]
+        missing = [
+            state["path"]
+            for state, repo in zip(repo_states, profile.workspace_repos)
+            if not state["present"] and repo.required
+        ]
         if missing:
             print(
                 "  warn:    not checked out here: "
@@ -971,12 +976,278 @@ def _record_path(profile: profile_mod.Profile, channel: str, day: str, source: s
     return release.next_path(profile, channel, day, source)
 
 
+@dataclass
+class ChannelPlan:
+    """Everything one channel's record needs, computed once and printed once."""
+
+    channel: str
+    repo: str
+    repo_root: Path
+    mainline: str
+    branch: str
+    head: str
+    previous: object | None
+    since: str | None
+    commits: list
+    debt: object
+    design_risk: list[str]
+    risk: list[str]
+    reconcile_risk: list[str]
+    counts: tuple | None
+    behind: int
+    control_dirty: list[str]
+
+    @property
+    def repo_label(self) -> str:
+        return self.repo or "."
+
+
+def _plan_channel(
+    profile: profile_mod.Profile, channel: str, since_arg: str | None
+) -> ChannelPlan:
+    bound = profile.channel(channel)
+    repo = bound.repo if bound else profile.control_path
+    repo_root = profile.repo_root(repo)
+    git.ensure_repo(repo_root)
+    branch = git.branch(repo_root)
+    head = git.head(repo_root)
+    previous = release.tip(profile, channel)
+    if since_arg:
+        if not git.is_ancestor(repo_root, since_arg, head):
+            raise FlowError(
+                f"--since {since_arg[:7]} is not an ancestor of HEAD; "
+                "fetch/pull or pass a commit from this clone's history"
+            )
+        if (
+            previous
+            and since_arg != previous.source
+            and git.is_ancestor(repo_root, previous.source, since_arg)
+        ):
+            raise FlowError(
+                f"--since {since_arg[:7]} starts after the recorded tip "
+                f"{previous.short}; record the range that follows the tip, "
+                "or fix the bookkeeping commit first"
+            )
+    since = since_arg or (previous.source if previous else None)
+    debt = reconcile.collect(profile, channel, since)
+    range_paths = [
+        profile.to_workspace(repo, path)
+        for path in git.files_in_range(repo_root, since)
+    ]
+    design_risk = checks.risk_paths_touched(profile, range_paths)
+    counts = git.upstream_counts(repo_root)
+    control_dirty = (
+        git.dirty(profile.control_root)
+        if profile.control_root != repo_root
+        else debt.dirty
+    )
+    return ChannelPlan(
+        channel=channel,
+        repo=repo,
+        repo_root=repo_root,
+        mainline=bound.mainline if bound else profile.release_mainline,
+        branch=branch,
+        head=head,
+        previous=previous,
+        since=since,
+        commits=git.commits(repo_root, since),
+        debt=debt,
+        design_risk=design_risk,
+        risk=design_risk if profile.release_confirm_risk_paths else [],
+        reconcile_risk=checks.paths_matching(range_paths, profile.risk_paths),
+        counts=counts,
+        behind=counts[1] if counts else 0,
+        control_dirty=control_dirty,
+    )
+
+
+def _print_plan(plan: ChannelPlan, profile: profile_mod.Profile) -> None:
+    day = checks.today()
+    target = _record_path(profile, plan.channel, day, plan.head)
+    suffix = f" (repo {plan.repo_label})" if profile.workspace else ""
+    print(f"channel: {plan.channel}{suffix}")
+    print(f"source: {plan.head[:7]} ({plan.branch or 'detached HEAD'})")
+    print(
+        f"previous: {plan.previous.short + ' (' + plan.previous.date + ')' if plan.previous else 'none'}"
+    )
+    print(f"commits: {len(plan.commits)}")
+    print(f"record: {target.relative_to(profile.root)}")
+    counts = plan.counts
+    if counts is None:
+        print("upstream: none configured; cannot prove this clone is current")
+    elif plan.behind:
+        print(f"upstream: behind {plan.behind} commit(s); pull before recording")
+    if plan.debt.dirty:
+        print(f"dirty tree: {len(plan.debt.dirty)} path(s); recording will be refused")
+    if plan.debt.blocking:
+        print(
+            f"debt: {len(plan.debt.no_item) + len(plan.debt.missing_item)} commit(s) "
+            "without a work item; --note is required to record"
+        )
+    if plan.debt.bookkeeping:
+        print(
+            f"bookkeeping: {len(plan.debt.bookkeeping)} commit(s) ignored "
+            "(records/archive only)"
+        )
+    if plan.reconcile_risk:
+        only = [path for path in plan.reconcile_risk if path not in plan.design_risk]
+        if only:
+            listed = ", ".join(only[:3]) + (
+                f" (+{len(only) - 3} more)" if len(only) > 3 else ""
+            )
+            print(
+                f"warn: [reconcile] risk paths touched but not in [design] risk_paths: "
+                f"{listed}; review whether --confirm should cover them"
+            )
+    if profile.release_confirm_risk_paths:
+        if plan.risk:
+            print(
+                f"risk paths: {len(plan.risk)} touched; --confirm is required to record "
+                "(the profile sets [release] confirm_risk_paths = true)"
+            )
+        else:
+            print("risk paths: none touched; no confirmation required")
+
+
+def _plan_errors(
+    plan: ChannelPlan,
+    profile: profile_mod.Profile,
+    confirm_text: str,
+    note: str,
+) -> list[str]:
+    errors: list[str] = []
+    if plan.behind:
+        errors.append(
+            f"this clone is behind its upstream by {plan.behind} commit(s); "
+            "pull before recording a release"
+        )
+    if plan.debt.dirty:
+        errors.append(
+            f"the {plan.repo_label} repository is dirty; commit or stash before "
+            "recording a release"
+        )
+    if plan.control_dirty and profile.control_root != plan.repo_root:
+        errors.append(
+            f"the control repository ({profile.control_path or '.'}) is dirty; the "
+            "record is written there, so commit or stash before recording"
+        )
+    if not plan.branch:
+        errors.append("detached HEAD; check out the mainline branch before recording a release")
+    elif plan.branch != plan.mainline:
+        errors.append(
+            f"current branch '{plan.branch}' is not the mainline '{plan.mainline}' for "
+            f"channel '{plan.channel}'; record from the mainline"
+        )
+    if (
+        plan.previous
+        and plan.head != plan.previous.source
+        and not git.is_ancestor(plan.repo_root, plan.previous.source, plan.head)
+    ):
+        errors.append(
+            f"this clone is behind the channel: {plan.previous.short} is not an "
+            "ancestor of HEAD. Pull or rebase before recording; the release must "
+            "follow the recorded tip."
+        )
+    if plan.debt.blocking and not note.strip():
+        errors.append(
+            "there are commits without work items; record the debt in --note "
+            "(do not fabricate history)"
+        )
+    if plan.risk and not confirm_text:
+        listed = ", ".join(plan.risk[:3]) + (
+            f" (+{len(plan.risk) - 3} more)" if len(plan.risk) > 3 else ""
+        )
+        errors.append(
+            f"this release touches a risk path ({listed}); "
+            'pass --confirm "<the human\'s words>" to record who authorized it'
+        )
+    return errors
+
+
+def _authorization(
+    risk: list[str], confirm_text: str, confirmed_by: str, by: str
+) -> str:
+    if not risk and not confirm_text:
+        return "None"
+    return (
+        f"- Required: {'yes' if risk else 'no'}\n"
+        f"- Confirmed by: {confirmed_by if confirm_text else '-'}\n"
+        f"- Recorded by: {by}\n"
+        f"- Note: {confirm_text or 'None'}"
+    )
+
+
+def _write_channel_record(
+    profile: profile_mod.Profile,
+    plan: ChannelPlan,
+    *,
+    day: str,
+    by: str,
+    gate_text: str,
+    artifact_list: list[str],
+    rollback: str,
+    note: str,
+    confirm_text: str,
+    confirmed_by: str,
+) -> Path:
+    record = release.render(
+        channel=plan.channel,
+        repo=plan.repo,
+        day=day,
+        source=plan.head,
+        previous=plan.previous.source if plan.previous else "none",
+        by=by,
+        tool=__version__,
+        gate=gate_text,
+        commits=_commit_text(plan.commits, plan.since, plan.debt.total),
+        items=_item_text(profile, plan.commits),
+        artifacts_text="\n".join(f"- {item}" for item in artifact_list) or "None",
+        rollback=rollback,
+        authorization=_authorization(plan.risk, confirm_text, confirmed_by, by),
+        notes=note,
+    )
+    with fsio.project_lock(profile.root):
+        current = release.tip(profile, plan.channel)
+        current_source = current.source if current else "none"
+        expected = plan.previous.source if plan.previous else "none"
+        if current_source != expected:
+            raise FlowError(
+                "another process recorded a release in this clone while the gate ran; "
+                "re-run release to plan against the new tip"
+            )
+        target = _record_path(profile, plan.channel, day, plan.head)
+        fsio.atomic_write_text(target, record)
+    return target
+
+
 def cmd_release(args) -> int:
     profile = _load_profile(args)
     if not profile.release_channels:
         print("no release channels configured; add [release] channels in the profile")
         return 0
-    if not args.channel:
+    if args.group and args.channel:
+        print("error: --channel and --group describe different releases; pick one")
+        return 2
+
+    group = None
+    if args.group:
+        group = profile.group(args.group)
+        if group is None:
+            print(
+                f"error: unknown release group '{args.group}'; configured: "
+                f"{', '.join(entry.name for entry in profile.release_groups) or 'none'}"
+            )
+            return 2
+        channels = list(group.channels)
+    elif args.channel:
+        if args.channel not in profile.release_channels:
+            print(
+                f"error: unknown channel '{args.channel}'; configured: "
+                f"{', '.join(profile.release_channels)}"
+            )
+            return 2
+        channels = [args.channel]
+    else:
         print(f"channels: {', '.join(profile.release_channels)}")
         status = 0
         for channel in profile.release_channels:
@@ -993,170 +1264,66 @@ def cmd_release(args) -> int:
                 )
             else:
                 print(f"  {channel}: no record")
+        for entry in profile.release_groups:
+            print(f"  group {entry.name}: {', '.join(entry.channels)}")
         return status
-    if args.channel not in profile.release_channels:
-        print(
-            f"error: unknown channel '{args.channel}'; configured: "
-            f"{', '.join(profile.release_channels)}"
-        )
-        return 2
 
-    channel = args.channel
-    bound = profile.channel(channel)
-    repo_root = profile.repo_root(bound.repo if bound else profile.control_path)
-    channel_mainline = bound.mainline if bound else profile.release_mainline
-    try:
-        git.ensure_repo(repo_root)
-        branch = git.branch(repo_root)
-        head = git.head(repo_root)
-        previous = release.tip(profile, channel)
-        if args.since:
-            if not git.is_ancestor(repo_root, args.since, head):
-                raise FlowError(
-                    f"--since {args.since[:7]} is not an ancestor of HEAD; "
-                    "fetch/pull or pass a commit from this clone's history"
-                )
-            if (
-                previous
-                and args.since != previous.source
-                and git.is_ancestor(repo_root, previous.source, args.since)
-            ):
-                raise FlowError(
-                    f"--since {args.since[:7]} starts after the recorded tip "
-                    f"{previous.short}; record the range that follows the tip, "
-                    "or fix the bookkeeping commit first"
-                )
-        since = args.since or (previous.source if previous else None)
-        commits = git.commits(repo_root, since)
-        debt = reconcile.collect(profile, channel, since)
-        range_paths = [
-            profile.to_workspace(bound.repo if bound else profile.control_path, path)
-            for path in git.files_in_range(repo_root, since)
-        ]
-        design_risk_touched = checks.risk_paths_touched(profile, range_paths)
-        risk_touched = (
-            design_risk_touched if profile.release_confirm_risk_paths else []
-        )
-        reconcile_risk = checks.paths_matching(range_paths, profile.risk_paths)
-        counts = git.upstream_counts(repo_root)
-        behind = counts[1] if counts else 0
-        control_dirty = (
-            git.dirty(profile.control_root)
-            if profile.control_root != repo_root
-            else debt.dirty
-        )
-    except git.GitError as exc:
-        print(f"error: {exc}")
-        return 2
+    plans: list[ChannelPlan] = []
+    for channel in channels:
+        try:
+            plans.append(_plan_channel(profile, channel, args.since))
+        except (git.GitError, FlowError) as exc:
+            prefix = f"{channel}: " if len(channels) > 1 else ""
+            print(f"error: {prefix}{exc}")
+            return 2
 
-    day = checks.today()
-    target = _record_path(profile, channel, day, head)
-    print(f"channel: {channel}")
-    print(f"source: {head[:7]} ({branch or 'detached HEAD'})")
-    print(
-        f"previous: {previous.short + ' (' + previous.date + ')' if previous else 'none'}"
-    )
-    print(f"commits: {len(commits)}")
-    print(f"gate: {profile.release_gate_level} (runs on --record)")
-    print(f"record: {target.relative_to(profile.root)}")
-    if counts is None:
-        print("upstream: none configured; cannot prove this clone is current")
-    elif behind:
-        print(f"upstream: behind {behind} commit(s); pull before recording")
-    if debt.dirty:
-        print(f"dirty tree: {len(debt.dirty)} path(s); recording will be refused")
-    if debt.blocking:
-        print(
-            f"debt: {len(debt.no_item) + len(debt.missing_item)} commit(s) without a "
-            "work item; --note is required to record"
-        )
-    if debt.bookkeeping:
-        print(f"bookkeeping: {len(debt.bookkeeping)} commit(s) ignored (records/archive only)")
-    if reconcile_risk:
-        only = [path for path in reconcile_risk if path not in design_risk_touched]
-        if only:
-            listed = ", ".join(only[:3]) + (
-                f" (+{len(only) - 3} more)" if len(only) > 3 else ""
-            )
-            print(
-                f"warn: [reconcile] risk paths touched but not in [design] risk_paths: {listed}; "
-                "review whether --confirm should cover them"
-            )
-    if profile.release_confirm_risk_paths:
-        if risk_touched:
-            print(
-                f"risk paths: {len(risk_touched)} touched; --confirm is required to record "
-                "(the profile sets [release] confirm_risk_paths = true)"
-            )
-        else:
-            print("risk paths: none touched; no confirmation required")
+    if group is not None:
+        print(f"group: {group.name}")
+        print(f"channels: {', '.join(plan.channel for plan in plans)}")
+        print(f"gate: {profile.release_gate_level} (one run covers every channel)")
+        umbrella = release.next_group_path(profile, group.name, checks.today())
+        print(f"index: {umbrella.relative_to(profile.root)}")
+        print("")
+    else:
+        print(f"gate: {profile.release_gate_level} (runs on --record)")
+    for plan in plans:
+        _print_plan(plan, profile)
+        print("")
 
     if not args.record:
-        print(f"\n{reconcile.render(debt, root=profile.root, verbose=args.verbose)}")
-        print("\nnext: add --record --rollback \"<target and steps>\" [--note \"...\"]")
+        for plan in plans:
+            print(
+                f"{plan.channel}:\n"
+                + reconcile.render(plan.debt, root=profile.root, verbose=args.verbose)
+            )
+        print('next: add --record --rollback "<target and steps>" [--note "..."]')
         return 0
 
     by = identity.resolve_for(profile, args.by)
     artifact_list = [item.strip() for item in (args.artifact or []) if item.strip()]
+    confirm_text = (args.confirm or "").strip()
+    confirmed_by = (getattr(args, "confirmed_by", "") or "").strip() or by
+    note_text = (args.note or "").strip()
+
     errors: list[str] = []
     if not args.rollback or not args.rollback.strip():
         errors.append("--rollback is required and must describe the rollback target and steps")
-    if behind:
-        errors.append(
-            f"this clone is behind its upstream by {behind} commit(s); "
-            "pull before recording a release"
-        )
-    if debt.dirty:
-        errors.append(
-            f"the {bound.repo or '.'} repository is dirty; commit or stash before "
-            "recording a release"
-        )
-    if control_dirty and profile.control_root != repo_root:
-        errors.append(
-            f"the control repository ({profile.control_path or '.'}) is dirty; the "
-            "record is written there, so commit or stash before recording"
-        )
-    if not branch:
-        errors.append("detached HEAD; check out the mainline branch before recording a release")
-    elif branch != channel_mainline:
-        errors.append(
-            f"current branch '{branch}' is not the mainline '{channel_mainline}' for "
-            f"channel '{channel}'; record from the mainline"
-        )
-    if previous and head != previous.source and not git.is_ancestor(
-        repo_root, previous.source, head
-    ):
-        errors.append(
-            f"this clone is behind the channel: {previous.short} is not an ancestor of HEAD. "
-            "Pull or rebase before recording; the release must follow the recorded tip."
-        )
     if profile.release_require_artifacts and not artifact_list:
         errors.append(
             "--artifact is required: the profile sets [release] require_artifacts = true"
         )
-    if debt.blocking and not (args.note or "").strip():
-        errors.append(
-            "there are commits without work items; record the debt in --note "
-            "(do not fabricate history)"
+    for plan in plans:
+        for error in _plan_errors(plan, profile, confirm_text, note_text):
+            errors.append(f"{plan.channel}: {error}" if len(plans) > 1 else error)
+    if confirm_text and not any(plan.risk for plan in plans):
+        print(
+            "warn: --confirm was given but the range touches no [design] risk path; "
+            "the record will say Required: no"
         )
-    confirm_text = (args.confirm or "").strip()
-    confirmed_by = (getattr(args, "confirmed_by", "") or "").strip() or by
-    if risk_touched and not confirm_text:
-        listed = ", ".join(risk_touched[:3]) + (
-            f" (+{len(risk_touched) - 3} more)" if len(risk_touched) > 3 else ""
-        )
-        errors.append(
-            f"this release touches a risk path ({listed}); "
-            "pass --confirm \"<the human's words>\" to record who authorized it"
-        )
-    if confirm_text and not risk_touched:
-        print("warn: --confirm was given but the range touches no [design] risk path; "
-              "the record will say Required: no")
     static_errors, static_warnings = checks.check_project(profile)
-    if static_errors:
-        errors.extend(f"check: {error}" for error in static_errors)
+    errors.extend(f"check: {error}" for error in static_errors)
     if errors:
-        print("\nFAIL: release not recorded")
+        print("FAIL: release not recorded")
         for error in errors:
             print(f"  - {error}")
         return 1
@@ -1180,45 +1347,53 @@ def cmd_release(args) -> int:
         item="release",
         repos=sorted({result.repo for result in results if result.repo}),
     )
+    gate_text = commands.summary(profile.release_gate_level, results)
 
-    if risk_touched or confirm_text:
-        authorization = (
-            f"- Required: {'yes' if risk_touched else 'no'}\n"
-            f"- Confirmed by: {confirmed_by if confirm_text else '-'}\n"
-            f"- Recorded by: {by}\n"
-            f"- Note: {confirm_text or 'None'}"
+    day = checks.today()
+    written: list[tuple[ChannelPlan, Path]] = []
+    for plan in plans:
+        target = _write_channel_record(
+            profile,
+            plan,
+            day=day,
+            by=by,
+            gate_text=gate_text,
+            artifact_list=artifact_list,
+            rollback=args.rollback.strip(),
+            note=(args.note or "None").strip(),
+            confirm_text=confirm_text,
+            confirmed_by=confirmed_by,
         )
-    else:
-        authorization = "None"
+        written.append((plan, target))
+        print(f"recorded {target.relative_to(profile.root)}")
+        print(
+            f"  source {plan.head[:7]}  previous "
+            f"{plan.previous.short if plan.previous else 'none'}"
+        )
 
-    record = release.render(
-        channel=channel,
-        repo=bound.repo if bound else profile.control_path,
-        day=day,
-        source=head,
-        previous=previous.source if previous else "none",
-        by=by,
-        tool=__version__,
-        gate=commands.summary(profile.release_gate_level, results),
-        commits=_commit_text(commits, since, debt.total),
-        items=_item_text(profile, commits),
-        artifacts_text="\n".join(f"- {item}" for item in artifact_list) or "None",
-        rollback=args.rollback.strip(),
-        authorization=authorization,
-        notes=(args.note or "None").strip(),
-    )
-    with fsio.project_lock(profile.root):
-        current = release.tip(profile, channel)
-        current_source = current.source if current else "none"
-        if current_source != (previous.source if previous else "none"):
-            raise FlowError(
-                "another process recorded a release in this clone while the gate ran; "
-                "re-run release to plan against the new tip"
-            )
-        target = _record_path(profile, channel, day, head)
-        fsio.atomic_write_text(target, record)
-    print(f"recorded {target.relative_to(profile.root)}")
-    print(f"  source {head[:7]}  previous {previous.short if previous else 'none'}")
+    if group is not None:
+        risk_any = [plan.channel for plan in plans if plan.risk]
+        umbrella_text = release.render_group(
+            group=group.name,
+            day=day,
+            by=by,
+            tool=__version__,
+            gate=gate_text
+            + "\n\nOne run of the level above covered every channel; each channel's "
+            "record repeats it.",
+            members=release.group_rows(
+                [(plan.channel, plan.repo, plan.head, path) for plan, path in written]
+            ),
+            rollback=args.rollback.strip(),
+            notes=(args.note or "None").strip(),
+            authorization=_authorization(risk_any, confirm_text, confirmed_by, by)
+            if risk_any or confirm_text
+            else "None",
+        )
+        index = release.next_group_path(profile, group.name, day)
+        with fsio.project_lock(profile.root):
+            fsio.atomic_write_text(index, umbrella_text)
+        print(f"index {index.relative_to(profile.root)} ({len(written)} channels)")
     print(f"  gate {profile.release_gate_level} PASS")
     print("next: commit the record so the next release reads the new watermark")
     return 0
@@ -1590,6 +1765,10 @@ def build_parser() -> argparse.ArgumentParser:
     release_parser = subparsers.add_parser("release", help="plan or record a channel release")
     add_common(release_parser)
     release_parser.add_argument("--channel", help="release channel; omit to list channels")
+    release_parser.add_argument(
+        "--group",
+        help="release group: every channel it names, then one index record",
+    )
     release_parser.add_argument("--record", action="store_true", help="run the gate and write a record")
     release_parser.add_argument("--rollback", help="rollback target and steps (required with --record)")
     release_parser.add_argument(

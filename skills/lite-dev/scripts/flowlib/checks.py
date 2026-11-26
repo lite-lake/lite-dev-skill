@@ -813,11 +813,14 @@ def repo_warnings(profile: Profile) -> list[str]:
     for repo in profile.workspace_repos:
         root = profile.repo_root(repo.path)
         if not root.is_dir():
-            warnings.append(
-                f"repository {repo.name} is not checked out here; its changes are "
-                "invisible to the gate on this machine (fetch it, or leave it out of "
-                "[[workspace.repo]] on machines that never use it)"
-            )
+            # `required = false` is the profile saying "some machines never check
+            # this out"; silence for those, report for everything else.
+            if repo.required:
+                warnings.append(
+                    f"repository {repo.name} is not checked out here; its changes are "
+                    "invisible to the gate on this machine (fetch it, or declare "
+                    "required = false if this machine never uses it)"
+                )
             continue
         try:
             if not git.is_repo(root):

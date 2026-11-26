@@ -15,7 +15,7 @@ output as before.
 |---|---|
 | `[project] root` | The path base. Every configured path is relative to it. |
 | `[workspace] control` | The repository that carries work items, release records, and the gate ledger. |
-| `[[workspace.repo]]` | A repository whose changes and commands the flow inspects. |
+| `[[workspace.repo]]` | A repository whose changes and commands the flow inspects. `required = false` means some machines never check it out. |
 | Workspace path | `svc-a/src/main.go` — the only namespace reports use. |
 
 ```toml
@@ -30,6 +30,11 @@ control = "docs"
 [[workspace.repo]]
 path = "svc-a"
 mainline = "main"
+
+[[workspace.repo]]
+path = "svc-b"
+mainline = "main"
+required = false        # this machine never checks it out
 ```
 
 Why an explicit root: root discovery walks up to the nearest repository. When
@@ -65,9 +70,10 @@ Scope is decided in this order, and the gate prints which rule it used:
 5. Everything, with a warning. Never silently.
 
 A repository that is declared but not checked out is named as unavailable, and
-the level says it did not inspect it. `check` reports the same set once, so the
-gap is visible before a gate run rather than only inside one. Missing output is
-loud; empty output is not evidence.
+the level says it did not inspect it. `check` reports the same set once, and
+`required = false` is how a profile says "this machine never checks it out", so
+only the repositories you expect here are reported. Missing output is loud;
+empty output is not evidence.
 
 ## Change detection spans repositories
 
@@ -103,6 +109,22 @@ record stores keep working.
 A change that ships several repositories produces one record per channel on the
 same day. `--record` refuses when the channel's repository or the control
 repository is dirty; another repository being dirty is a warning, not a block.
+
+When those repositories ship as **one event**, declare them as a group:
+
+```toml
+[[release.group]]
+name = "platform"
+channels = ["svc-a", "svc-b"]
+```
+
+`release --group platform --record` plans every channel, refuses if any one of
+them is not recordable (naming it), runs the gate **once** for the whole group,
+writes each channel's record, then writes one index record
+(`group-platform-<date>.md`) that links them with their sources. The index
+carries no `channel` and no `source`, so it is not a release: it never enters a
+chain and never becomes a watermark. Deleting it loses the summary, not the
+evidence.
 
 ## Who owns which fact
 
@@ -169,6 +191,9 @@ holding the name on that machine. `user.name` is still never used, and
 - No nested repositories: declare the outermost one, or changes are counted
   twice.
 - No second work-item store: items live in the control repository.
+- A group is not a release: it indexes channels that stay independent. If the
+  channels disagree, fix them one by one; the group record cannot diverge
+  because it holds no chain.
 - No task-board integration. An item may carry `prd:` and `board:` pointers, but
   the board remains the authority for who holds a task.
 - `[reconcile] baseline` names a commit in the control repository. A channel

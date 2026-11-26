@@ -80,6 +80,15 @@ name = "svc-a"
 repo = "svc-a"
 mainline = "main"
 
+[[release.channel]]
+name = "svc-b"
+repo = "svc-b"
+mainline = "main"
+
+[[release.group]]
+name = "platform"
+channels = ["svc-a", "svc-b"]
+
 [reconcile]
 risk_paths = ["svc-a/migrations/"]
 """
@@ -198,7 +207,20 @@ class ProfileWorkspaceTest(WorkspaceCase):
         channel = p.channel("svc-a")
         self.assertIsNotNone(channel)
         self.assertEqual(channel.repo, "svc-a")
-        self.assertEqual(p.release_channels, ["svc-a"])
+        self.assertEqual(p.release_channels, ["svc-a", "svc-b"])
+
+    def test_a_group_names_existing_channels(self) -> None:
+        p = self.load()
+        group = p.group("platform")
+        self.assertIsNotNone(group)
+        self.assertEqual(group.channels, ["svc-a", "svc-b"])
+
+    def test_a_group_cannot_invent_a_channel(self) -> None:
+        text = PROFILE.replace('channels = ["svc-a", "svc-b"]', 'channels = ["svc-a", "svc-c"]')
+        with self.assertRaises(profile_mod.ProfileError) as caught:
+            self.load(text)
+        self.assertIn("is not configured", str(caught.exception))
+        self.assertIn("[[release.channel]]", str(caught.exception))
 
     def test_legacy_channel_list_means_the_control_repository(self) -> None:
         text = PROFILE.split("[[release.channel]]")[0]
@@ -618,3 +640,100 @@ class WorkspaceDiagnosticsTest(WorkspaceCase):
         result = self.run_flow("status", "--repo", "nope")
         self.assertEqual(result.returncode, 2)
         self.assertIn("not a declared repository", result.stdout)
+
+
+class WorkspaceReleaseGroupTest(WorkspaceCase):
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.rmtree(self.root)
+        shutil.copytree(EXAMPLE, self.root)
+        for repo in ("docs", "svc-a", "svc-b"):
+            git(self.root / repo, "init", "-q", "-b", "main")
+            git(self.root / repo, "add", "-A")
+            git(self.root / repo, "commit", "-qm", f"init {repo}")
+
+    def record_group(self, *extra: str):
+        return self.run_flow(
+            "release",
+            "--group",
+            "platform",
+            "--record",
+            "--rollback",
+            "revert the commits",
+            "--note",
+            "initial repository import",
+            *extra,
+        )
+
+    def test_a_group_records_each_channel_and_one_index(self) -> None:
+        result = self.record_group()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # One gate run covers every channel; each record repeats its summary.
+        self.assertEqual(result.stdout.count("gate l3: PASS\n"), 1, result.stdout)
+
+        releases = sorted((self.root / "docs/releases").glob("*.md"))
+        names = [path.name for path in releases]
+        self.assertTrue(any(name.startswith("svc-a-") for name in names), names)
+        self.assertTrue(any(name.startswith("svc-b-") for name in names), names)
+        index = [path for path in releases if path.name.startswith("group-platform-")][0]
+        text = index.read_text(encoding="utf-8")
+        self.assertIn("group: platform", text)
+        self.assertIn("| svc-a | svc-a |", text)
+        self.assertIn("| svc-b | svc-b |", text)
+        # An index is not a release: it carries no source of its own.
+        self.assertNotIn("source:", text)
+
+        listing = self.run_flow("release")
+        self.assertEqual(listing.returncode, 0, listing.stdout + listing.stderr)
+        self.assertIn("group platform: svc-a, svc-b", listing.stdout)
+        self.assertIn("svc-a: last", listing.stdout)
+
+        reconcile = self.run_flow("reconcile", "--channel", "svc-a")
+        self.assertEqual(
+            reconcile.returncode, 0, reconcile.stdout + reconcile.stderr
+        )
+
+    def test_the_index_is_not_part_of_a_chain(self) -> None:
+        first = self.record_group()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        plan = self.run_flow("release", "--channel", "svc-a")
+        self.assertEqual(plan.returncode, 0, plan.stdout + plan.stderr)
+        self.assertNotIn("previous: none", plan.stdout)
+
+    def test_a_group_release_names_the_channel_that_blocks_it(self) -> None:
+        self.write("svc-b/blocked.txt", "x\n")
+        result = self.record_group()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("svc-b: ", result.stdout)
+        self.assertIn("repository is dirty", result.stdout)
+
+    def test_channel_and_group_are_mutually_exclusive(self) -> None:
+        result = self.run_flow(
+            "release", "--group", "platform", "--channel", "svc-a"
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("pick one", result.stdout)
+
+    def test_an_unknown_group_lists_the_configured_ones(self) -> None:
+        result = self.run_flow("release", "--group", "nope")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown release group", result.stdout)
+        self.assertIn("platform", result.stdout)
+
+    def test_an_optional_repository_may_be_absent(self) -> None:
+        profile_path = self.root / "docs/flow/profile.toml"
+        text = profile_path.read_text(encoding="utf-8")
+        text = text.replace(
+            'path = "svc-b"\nmainline = "main"',
+            'path = "svc-b"\nmainline = "main"\nrequired = false',
+        )
+        profile_path.write_text(text, encoding="utf-8")
+        shutil.rmtree(self.root / "svc-b")
+
+        check = self.run_flow("check")
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertNotIn("svc-b is not checked out here", check.stdout)
+
+        status = self.run_flow("status")
+        self.assertEqual(status.returncode, 0, status.stdout + status.stderr)
+        self.assertNotIn("not checked out here", status.stdout)

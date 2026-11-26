@@ -37,6 +37,8 @@ work_dir = "docs/work"
 # [[workspace.repo]]
 # path = "svc-b"
 # mainline = "main"
+# A machine that never checks this out says so, instead of leaving a warning.
+# required = false
 
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
@@ -142,6 +144,12 @@ channels = []
 # name = "svc-a"
 # repo = "svc-a"
 # mainline = "main"
+#
+# Channels that ship together: `release --group <name> --record` records each
+# channel and then writes one index record that links them.
+# [[release.group]]
+# name = "platform"
+# channels = ["svc-a", "svc-b"]
 dir = "docs/releases"
 gate_level = "l3"
 mainline = "main"

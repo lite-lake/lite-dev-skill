@@ -102,6 +102,7 @@ python3 <skill>/scripts/flow.py handoff <ID> [--batch Bx]
 python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
 python3 <skill>/scripts/flow.py whoami
 python3 <skill>/scripts/flow.py release --channel staging [--confirm "..."] [--confirmed-by "Name"]
+python3 <skill>/scripts/flow.py release --group <name> [--record --rollback "..."]
 python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```

@@ -52,6 +52,7 @@ class Repo:
     path: str
     mainline: str
     control: bool = False
+    required: bool = True
 
     @property
     def name(self) -> str:
@@ -69,6 +70,19 @@ class Channel:
     name: str
     repo: str
     mainline: str
+
+
+@dataclass(frozen=True)
+class Group:
+    """Channels that ship together as one release.
+
+    The group is a convenience over the chains, not a chain of its own: each
+    channel still records in its own repository, and the group writes one index
+    record that links them. Nothing new becomes shared state.
+    """
+
+    name: str
+    channels: list[str]
 
 
 class ProfileError(Exception):
@@ -93,6 +107,7 @@ class Profile:
     control_path: str
     workspace_repos: list[Repo]
     channels: list[Channel]
+    release_groups: list[Group]
     owner_file: str
     command_dirs: dict[str, str]
     docs_stores: list[str]
@@ -183,6 +198,12 @@ class Profile:
 
     def channel(self, name: str) -> "Channel | None":
         for entry in self.channels:
+            if entry.name == name:
+                return entry
+        return None
+
+    def group(self, name: str) -> "Group | None":
+        for entry in self.release_groups:
             if entry.name == name:
                 return entry
         return None
@@ -511,7 +532,7 @@ def _parse_workspace(
         where = f"[[workspace.repo]] #{index}"
         if not isinstance(entry, dict):
             raise ProfileError(f"{where} must be a table")
-        _allow_keys(entry, ("path", "mainline"), where)
+        _allow_keys(entry, ("path", "mainline", "required"), where)
         path = _relative_dir(entry.get("path"), f"{where} path")
         if path in seen:
             raise ProfileError(f"{where}: duplicate repository {path!r}")
@@ -526,8 +547,21 @@ def _parse_workspace(
         repo_mainline = entry.get("mainline", mainline)
         if not isinstance(repo_mainline, str) or not repo_mainline.strip():
             raise ProfileError(f"{where}: mainline must be a branch name")
+        required = entry.get("required", True)
+        if not isinstance(required, bool):
+            raise ProfileError(
+                f"{where}: required must be true or false (false means this machine "
+                "may not check the repository out)"
+            )
         seen.add(path)
-        repos.append(Repo(path=path, mainline=repo_mainline.strip(), control=False))
+        repos.append(
+            Repo(
+                path=path,
+                mainline=repo_mainline.strip(),
+                control=False,
+                required=required,
+            )
+        )
     return control, repos
 
 
@@ -579,6 +613,48 @@ def _parse_channels(
             Channel(name=name, repo=repo, mainline=chan_mainline.strip())
         )
     return channels
+
+
+def _parse_groups(release: dict, channels: list[Channel]) -> list[Group]:
+    """Channels that ship as one release.
+
+    A group names channels that already exist; it cannot invent one, because a
+    channel is what carries the chain. Recording a group is recording each
+    channel and then writing an index record.
+    """
+    entries = release.get("group", [])
+    if not isinstance(entries, list):
+        raise ProfileError("[[release.group]] must be an array of tables")
+    known = {channel.name for channel in channels}
+    groups: list[Group] = []
+    names: set[str] = set()
+    for index, entry in enumerate(entries, 1):
+        where = f"[[release.group]] #{index}"
+        if not isinstance(entry, dict):
+            raise ProfileError(f"{where} must be a table")
+        _allow_keys(entry, ("name", "channels"), where)
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ProfileError(f"{where}: 'name' is required")
+        name = name.strip()
+        if name in names:
+            raise ProfileError(f"{where}: duplicate release group {name!r}")
+        members = _string_list(entry.get("channels", []), f"{where} channels")
+        if not members:
+            raise ProfileError(f"{where}: 'channels' must name at least one channel")
+        cleaned: list[str] = []
+        for member in members:
+            member = member.strip()
+            if member not in known:
+                raise ProfileError(
+                    f"{where}: channel {member!r} is not configured; groups name "
+                    "existing channels only — add [[release.channel]] for it first"
+                )
+            if member not in cleaned:
+                cleaned.append(member)
+        names.add(name)
+        groups.append(Group(name=name, channels=cleaned))
+    return groups
 
 
 def _merge_extension(
@@ -786,6 +862,7 @@ def load(path: Path | str | None = None) -> Profile:
         (
             "channels",
             "channel",
+            "group",
             "dir",
             "gate_level",
             "mainline",
@@ -966,6 +1043,7 @@ def load(path: Path | str | None = None) -> Profile:
                 "not in [[workspace.repo]]; declare it or fix the channel"
             )
     release_channels = [entry.name for entry in channels]
+    release_groups = _parse_groups(release, channels)
 
     extensions_enabled, extensions_dir, extension_info = _apply_extensions(
         root, extensions, commands, gate, required_docs, risk_paths
@@ -1008,6 +1086,7 @@ def load(path: Path | str | None = None) -> Profile:
         control_path=control_path,
         workspace_repos=list(workspace_repos),
         channels=list(channels),
+        release_groups=list(release_groups),
         owner_file=owner_file,
         command_dirs=dict(command_dirs),
         docs_stores=list(docs_stores),

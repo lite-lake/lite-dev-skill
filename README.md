@@ -229,7 +229,9 @@ svc_a_test = { dir = "svc-a", run = "go test ./..." }
   the whole workspace.
 - **Releases are per repository.** `[[release.channel]]` binds a channel to one
   repository, the record carries `repo:`, and the chain is ordered by that
-  repository's history — the old rule, applied to the right graph.
+  repository's history — the old rule, applied to the right graph. Channels that
+  ship together form a `[[release.group]]`: one command records each, runs the
+  gate once, and writes an index record that links them.
 - **Documents get a record-store list.** `[docs] stores` names requirement and
   asset trees so they are not asked for an index; a cross-repository link inside
   the root is fine, an absolute path or a link that leaves the root is a warning

@@ -89,6 +89,29 @@ being dirty is a warning, because its uncommitted work is not part of this
 release. A change that ships several repositories writes one record per channel;
 the records are the evidence, an umbrella note is a convenience.
 
+## Channels that ship together
+
+When several channels go out as one event, declare a group:
+
+```toml
+[[release.group]]
+name = "platform"
+channels = ["svc-a", "svc-b"]
+```
+
+`release --group platform` plans every channel and prints each one; `--record`
+refuses if any channel is not recordable (naming it), runs the gate once for the
+whole group, writes each channel's record, then writes one index record:
+
+```
+docs/releases/group-platform-2026-11-30.md
+```
+
+The index lists `Channel | Repo | Source | Record` and carries no `channel` or
+`source` of its own. That is deliberate: the chains remain per repository, so the
+index can never become a watermark and can never diverge from them. Losing it
+loses a summary, not evidence.
+
 The record is rendered from `templates/release.md`; headings and frontmatter
 keys are a parsing contract. The filename contains the date and the short
 source (`staging-20261031-a1b2c3.md`), so records from different machines do not

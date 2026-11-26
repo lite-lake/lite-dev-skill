@@ -15,6 +15,7 @@ from .errors import FlowError
 from .profile import Profile
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "release.md"
+GROUP_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "release-group.md"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -239,3 +240,56 @@ def render(
     }.items():
         text = text.replace(token, value)
     return text
+
+
+def next_group_path(profile: Profile, group: str, day: str) -> Path:
+    base = f"group-{group}-{day}"
+    candidate = profile.release_path / f"{base}.md"
+    index = 2
+    while candidate.exists():
+        candidate = profile.release_path / f"{base}-{index}.md"
+        index += 1
+    return candidate
+
+
+def render_group(
+    group: str,
+    day: str,
+    by: str,
+    tool: str,
+    gate: str,
+    members: str,
+    rollback: str,
+    notes: str,
+    authorization: str = "None",
+) -> str:
+    """The index record: a release that spans repositories, read as one event.
+
+    It carries no `channel` and no `source`, so `load_records` ignores it and it
+    never enters a chain. The chains stay in their own repositories; this file
+    only answers "what shipped together, from which commits".
+    """
+    text = GROUP_TEMPLATE.read_text(encoding="utf-8")
+    for token, value in {
+        "<GROUP>": group,
+        "<DATE>": day,
+        "<BY>": by,
+        "<TOOL>": tool,
+        "<GATE>": gate,
+        "<MEMBERS>": members,
+        "<ROLLBACK>": rollback,
+        "<AUTHORIZATION>": authorization,
+        "<NOTES>": notes,
+    }.items():
+        text = text.replace(token, value)
+    return text
+
+
+def group_rows(entries: list[tuple[str, str, str, Path]]) -> str:
+    """`| Channel | Repo | Source | Record |` rows, linked in the same directory."""
+    lines = ["| Channel | Repo | Source | Record |", "|---|---|---|---|"]
+    for channel, repo, source, path in entries:
+        lines.append(
+            f"| {channel} | {repo or '.'} | `{source[:7]}` | [{path.name}]({path.name}) |"
+        )
+    return "\n".join(lines)

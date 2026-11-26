@@ -2,6 +2,40 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.4.2 — 2026-11-27
+
+A release that spans repositories can now be recorded as one event, and a
+profile can say which repositories a machine is not expected to have. Both are
+additive; nothing in the existing schema changes meaning.
+
+### Added
+
+- `[[release.group]]` + `release --group <name>`: channels that ship together.
+  `--record` plans every channel, refuses if any one is not recordable (naming
+  it), runs the configured gate **once** for the whole group, writes each
+  channel's record, then writes one index record
+  (`group-<name>-<date>.md`) listing `Channel | Repo | Source | Record`. The
+  index carries no `channel` and no `source`, so `load_records` ignores it: it
+  never enters a chain and can never become a watermark.
+- `[[workspace.repo]] required = false`: this machine never checks the
+  repository out. `check` and `status` stay quiet about it; a repository that is
+  present but is not a git work tree is still reported.
+- `templates/release-group.md` — the index record's shape, kept next to the
+  channel record's.
+
+### Changed
+
+- `cmd_release` computes one channel *plan* (repository, branch, HEAD, commits,
+  debt, risk paths) and both the single-channel and group paths use it, so the
+  refusals, the printed plan, and the debt report cannot drift apart.
+- `release` with neither `--channel` nor `--group` also lists the configured
+  groups.
+
+### Breaking changes
+
+- None. `>=0.4.0,<0.5` still matches; `[[release.group]]` and `required` are
+  optional keys.
+
 ## 0.4.1 — 2026-11-27
 
 The workspace release left three rough edges and one gap in the prose. This

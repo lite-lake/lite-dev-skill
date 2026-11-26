@@ -66,5 +66,16 @@ name = "svc-a"
 repo = "svc-a"
 mainline = "main"
 
+[[release.channel]]
+name = "svc-b"
+repo = "svc-b"
+mainline = "main"
+
+# Channels that ship together. Recording the group records each channel and then
+# writes one index record that links them; the chains stay per repository.
+[[release.group]]
+name = "platform"
+channels = ["svc-a", "svc-b"]
+
 [reconcile]
 risk_paths = ["svc-a/migrations/"]
