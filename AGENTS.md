@@ -28,12 +28,19 @@ every template.
    an invariant in `spec/invariants.md`.
 6. **Profile commands are executable input.** Never interpolate untrusted content
    into a command or a generated profile.
+7. **Docs ship in two languages.** `README.md` pairs with `README.zh.md`, and
+   `CHANGELOG.md` pairs with `CHANGELOG.zh.md`. Both halves of a pair change in
+   the same commit, in the same section order, and every new section lands in
+   both. The Chinese file mirrors the English structure section by section; only
+   the prose is translated. Headings that `scripts/flowlib` parses stay English
+   in both. Do not let one language drift ahead.
 
 ## Before you finish
 
 - Run the unit tests and the `examples/minimal` acceptance:
   `new → check → status → design-ready → gate → done`.
-- Update `CHANGELOG.md`; note breaking changes explicitly.
+- Update `CHANGELOG.md` **and** `CHANGELOG.zh.md`; note breaking changes
+  explicitly. Same for `README.md` / `README.zh.md`.
 - If you changed an invariant, bump the major version and say so in the changelog.
 
 ## Style

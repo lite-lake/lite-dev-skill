@@ -1,5 +1,7 @@
 # lite-dev-skill
 
+**English** | [简体中文](README.zh.md)
+
 `lite-dev` is an agent-first development flow that ships as an installable
 **skill**: a protocol, templates, and a small profile-driven tool. Install it,
 write one profile, and an agent can run a change from clarification to recorded
@@ -42,7 +44,7 @@ Three things make it different from a checklist:
 - Not a task tracker, a spec generator, or a project management tool.
 - Not a replacement for your tests. It decides *when* they run and *what counts
   as evidence*.
-- Not a multi-repo orchestrator (v0.1). Single repository only.
+- Not a multi-repo orchestrator. Single repository only.
 
 ## Quick start
 
@@ -139,6 +141,6 @@ The current release implements `new`, `status`, `check`, `design-ready`, `gate`,
 `done`, `release`, `reconcile`, `extensions`, the templates, the invariants, and
 a runnable single-repo example. Planned: a multi-repo workspace profile.
 
-Versions and breaking changes live in `CHANGELOG.md`.
+Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 
 BSD 2-Clause licensed. See `LICENSE`.

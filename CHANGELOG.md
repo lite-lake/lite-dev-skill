@@ -1,5 +1,22 @@
 # Changelog
 
+**English** | [简体中文](CHANGELOG.zh.md)
+
+## Unreleased
+
+### Added
+
+- `CHANGELOG.zh.md`, a section-by-section Chinese counterpart of this file.
+- `README.zh.md` rewritten as a full mirror of `README.md` (it was a condensed
+  version missing sections such as the deterministic/model table).
+- Language switcher links at the top of both READMEs and both changelogs.
+
+### Changed
+
+- Dropped the `(v0.1)` version number from both READMEs, per invariant 9
+  ("entry documents contain no version numbers"). The line now reads "Not a
+  multi-repo orchestrator. Single repository only."
+
 ## 0.2.1 — 2026-11-26
 
 ### Changed
