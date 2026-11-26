@@ -95,9 +95,9 @@ that teaches people to ignore the file.
   gate/smoke results, the configured artefacts, and a rollback target.
 - Records form one chain per channel; the watermark is the ancestry tip of that
   chain, not a filename or a local clock.
-- Commits that only add records or archive an item are bookkeeping, not debt.
-  Other commits without work items are recorded as adhoc debt; they are not
-  blocked, but they cannot be skipped with `--since`.
+- Commits that only add records, change the profile, or archive an item are
+  bookkeeping, not debt. Other commits without work items are recorded as adhoc
+  debt; they are not blocked, but they cannot be skipped with `--since`.
 - `## Work items` names only existing (active or archived) items; an unknown id
   is labelled `(missing)`.
 - **Enforced**: `release --record` runs `check` and the configured gate level,
@@ -128,13 +128,15 @@ that teaches people to ignore the file.
   one row, and every row resolves to an archived item.
 - A silence is a record, not a switch: an exception names one check, one path, a
   reason, and an expiry. An expired exception suppresses nothing and is an error.
+  A global switch (`check_links`, `zero_fact`) is reported on every run, and an
+  enabled check that inspects nothing is reported as inert.
 - **Enforced**: `check` reports missing required documents, unresolved relative
   links, unreachable directory indexes, directories with no index, unindexed
   files, unmentioned item artifacts, archive-index drift, duplicate headings in
   a release record, version/port/date/count pins in entry documents, broken
-  decision chains, and expired or unused exemptions. Record stores (work items,
-  release records, `_archive/`) are excluded from the link index. Whether the
-  prose is true is still human.
+  decision chains, expired or unused exemptions, and a disabled or inert check.
+  Record stores (work items, release records, `_archive/`) are excluded from the
+  link index. Whether the prose is true is still human.
 
 ## 10. Extensions may add, never remove
 

@@ -17,11 +17,37 @@ It always exits 0 when it can produce a report. Missing git, an unknown channel,
 a bad `--since`, or a release record it cannot order exits 2. Debt never blocks
 anything; an ambiguous channel history does.
 
+## No release channel yet
+
+A project that adopted the flow mid-history has no release record to anchor the
+range, and that is exactly when the debt is worth seeing. Give it a baseline:
+
+```toml
+[reconcile]
+baseline = "<commit>"     # `flow.py init --baseline` writes it
+```
+
+Then `reconcile` inspects `baseline..HEAD` and labels the run `channel: baseline`.
+`--since <commit>` does the same for one run. The baseline is a record, not a
+switch: it says "history before adoption is not inspected here", and commits
+after it stay debt. Set it only on a clean tree, so it names a commit somebody
+meant.
+
+Without channels and without a baseline, `reconcile` exits 2 and names both
+fixes; it does not silently inspect the whole history and call it a report.
+
+Every commit that only touches the profile, the work store, or the release store
+is bookkeeping, not debt: adopting the flow changes the profile, and a release
+or archive writes records. Risk paths are reported before that classification,
+so a profile change that touches one is still named.
+
 ## Watermark
 
 The watermark is the ancestry tip of the channel's records, not the newest
 filename. `--since` overrides it and must be an ancestor of HEAD. With no
 record, the whole history is inspected; use `--since` on a large repository.
+`[reconcile] baseline` fills that gap only while a channel has no record: once a
+record exists, the watermark wins.
 On `release --record`, `--since` may start earlier than the recorded tip (a
 first-release baseline) but never later; it cannot skip debt between the tip
 and HEAD.

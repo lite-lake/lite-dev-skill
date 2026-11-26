@@ -2,6 +2,46 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.8 — 2026-11-27
+
+Adoption is now a step the tool performs instead of a README to follow: `init`
+scaffolds a new or an existing project, `reconcile` works from a baseline before
+any release exists, and a check that is off — or on but inspecting nothing — says
+so on every run.
+
+### Added
+
+- `flow.py init [--adopt] [--baseline]`: writes a missing
+  `docs/flow/profile.toml` pinned to this install's version with the detected
+  mainline, the required entry documents, and a routing block in `AGENTS.md`
+  (after the title when one exists). Existing files are never replaced, the block
+  is never inserted twice, and the command ends by running `check` and printing
+  the next step. It works without git; `--adopt` prints the ramp for a project
+  that already has code and documents.
+- `[reconcile] baseline`: with no release record yet, `reconcile` inspects
+  `baseline..HEAD` and labels the run `channel: baseline`; `--since` does the
+  same for one run. `init --baseline` writes it on a clean tree. With neither,
+  `reconcile` exits 2 and names both fixes instead of inspecting the whole
+  history and calling it a report.
+- `check` reports `[docs] check_links = false` and `zero_fact = false` on every
+  run, and reports `zero_fact = true` with no entry document in `[docs]
+  required` as inert: an enabled check that inspects nothing is the same failure
+  as a disabled one, with extra steps.
+
+### Changed
+
+- A commit that only touches the profile is bookkeeping, not debt: adopting the
+  flow changes the profile, and that commit cannot carry a work item. Risk paths
+  are still reported before the classification, so a profile change that touches
+  one is named.
+- The missing-profile error names `flow.py init`, not only `--profile`.
+- `profile.template.toml` requires `>=0.3.8,<0.4`.
+
+### Breaking changes
+
+- None. A profile pinned to `>=0.3.7,<0.4` still loads. `reconcile` without a
+  channel and without a baseline still exits 2; the message now names the fix.
+
 ## 0.3.7 — 2026-11-26
 
 The protocol now says what the tool does: M is a one-session design, every item

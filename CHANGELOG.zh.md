@@ -2,6 +2,39 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.3.8 — 2026-11-27
+
+接入现在由工具完成，而不是靠人照 README 抄：`init` 既能给新项目也能给已有项目搭骨架，
+`reconcile` 在没有发布记录时也能从基线算起，而关掉的检查、以及开着却什么也没检查的
+检查，每次运行都会自己说出来。
+
+### 新增
+
+- `flow.py init [--adopt] [--baseline]`：写出缺失的 `docs/flow/profile.toml`
+  （钉住当前安装的版本，并填入探测到的主线分支）、必需的入口文档，并在
+  `AGENTS.md` 里插入路由块（有标题时插在标题之后）。已存在的文件绝不覆盖，路由块
+  不会重复插入；命令最后跑一次 `check` 并打印下一步。没有 git 也能用；`--adopt`
+  会打印已有代码与文档的项目该走的接入阶梯。
+- `[reconcile] baseline`：还没有发布记录时，`reconcile` 检查 `baseline..HEAD`，
+  并把这次运行标为 `channel: baseline`；`--since` 可以对单次运行做同样的事。
+  `init --baseline` 在干净工作树上写入它。两者都没有时，`reconcile` exit 2 并点名
+  两种修法，而不是把整段历史当成报告。
+- `check` 每次运行都报告 `[docs] check_links = false` 和 `zero_fact = false`；
+  `zero_fact = true` 但 `[docs] required` 里没有入口文档时，报告该检查「空转」：
+  开着却什么也不检查，和关掉它是同一种失败，只是多了几步。
+
+### 变更
+
+- 只改动 profile 的提交算记账，不算欠账：接入流程本来就要改 profile，而这种提交无法
+  带工作项。风险路径在归类之前就已报告，所以碰到风险路径的 profile 改动仍会被点名。
+- 缺少 profile 的错误现在会指出 `flow.py init`，而不只是 `--profile`。
+- `profile.template.toml` 要求 `>=0.3.8,<0.4`。
+
+### 破坏性变更
+
+- 无。钉在 `>=0.3.7,<0.4` 的 profile 仍可加载。没有通道也没有基线时 `reconcile`
+  仍然 exit 2，只是信息里给出了修法。
+
 ## 0.3.7 — 2026-11-26
 
 协议现在和工具一致：M 是「单会话但有设计」，每个条目收尾都要证据和记录在案的门禁，

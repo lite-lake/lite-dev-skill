@@ -1,5 +1,6 @@
 # AGENTS.md — minimal
 
+<!-- lite-dev:begin -->
 This project uses lite-dev. Before implementing, fixing, designing, or releasing
 anything, read `<path-to-lite-dev-skill>/skills/lite-dev/SKILL.md`.
 
@@ -12,3 +13,4 @@ anything, read `<path-to-lite-dev-skill>/skills/lite-dev/SKILL.md`.
 Size S is one-shot. Sizes M and L require `design.md` and a human-confirmed plan
 before code; L also runs as two-phase. The authority is `[design] required_for`
 in the profile.
+<!-- lite-dev:end -->

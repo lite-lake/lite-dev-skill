@@ -73,6 +73,7 @@ class Profile:
     release_require_artifacts: bool
     release_confirm_risk_paths: bool
     risk_paths: list[str]
+    reconcile_baseline: str
     gate_fallback_paths: list[str]
     gate_fresh_days: int
     extensions_enabled: list[str]
@@ -109,7 +110,8 @@ def find_profile(start: Path | None = None) -> Path:
         if candidate.is_file():
             return candidate
     raise ProfileError(
-        "no docs/flow/profile.toml found; run from the project root or pass --profile"
+        "no docs/flow/profile.toml found; run `flow.py init` from the project root "
+        "to scaffold it, or pass --profile"
     )
 
 
@@ -468,7 +470,7 @@ def load(path: Path | str | None = None) -> Profile:
         ),
         "[release]",
     )
-    _allow_keys(reconcile, ("risk_paths",), "[reconcile]")
+    _allow_keys(reconcile, ("risk_paths", "baseline"), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
     _allow_keys(flow_table, ("requires",), "[flow]")
     _allow_keys(gate, (*LEVELS, "fallback_paths", "fresh_days"), "[gate]")
@@ -574,6 +576,10 @@ def load(path: Path | str | None = None) -> Profile:
     risk_paths = _string_list(
         reconcile.get("risk_paths", []), "[reconcile] risk_paths"
     )
+    reconcile_baseline = reconcile.get("baseline", "")
+    if not isinstance(reconcile_baseline, str):
+        raise ProfileError("[reconcile] baseline must be a commit id or ref")
+    reconcile_baseline = reconcile_baseline.strip()
 
     # Normally <root>/docs/flow/profile.toml. Prefer the repository root when
     # there is a .git; otherwise honor the conventional three-level path and
@@ -650,6 +656,7 @@ def load(path: Path | str | None = None) -> Profile:
         release_require_artifacts=release_require_artifacts,
         release_confirm_risk_paths=release_confirm_risk_paths,
         risk_paths=list(risk_paths),
+        reconcile_baseline=reconcile_baseline,
         gate_fallback_paths=list(gate_fallback_paths),
         gate_fresh_days=gate_fresh_days,
         extensions_enabled=list(extensions_enabled),

@@ -52,15 +52,16 @@
    git clone https://github.com/lite-lake/lite-dev-skill.git
    ```
 
-2. **创建 profile。**
+2. **生成项目骨架。**
 
    ```bash
-   mkdir -p docs/flow
-   cp <skill>/profile.template.toml docs/flow/profile.toml
+   python3 <skill>/scripts/flow.py init
    ```
 
-   修改 `commands`、`gate`、`mainline`、`[flow] requires`、`docs.required`。
-   这是唯一含项目事实的文件。
+   它会写出 `docs/flow/profile.toml`（钉住当前安装的版本，并填入探测到的主线分支）、
+   必需的入口文档，并在 `AGENTS.md` 里插入路由块（有标题时插在标题之后）。已存在的
+   文件一律不覆盖；最后它会跑一次 `check` 并打印下一步。然后编辑 `commands`、`gate`
+   和 `[design] risk_paths`：profile 是唯一含项目事实的文件。
 
 3. **设置身份。** 每个人一份，每台机器都设一次：
 
@@ -83,6 +84,23 @@
    python3 <skill>/scripts/flow.py check
    ```
 
+## 接入已有项目
+
+已经有代码、测试和习惯的项目不必重来。闭环从下一次改动开始，接入过程是显式的：
+
+1. **`flow.py init --adopt`。** 它保留找到的每个文件，在 `AGENTS.md` 里插入路由块，
+   并把现有文档树如实报出来：漂移是 warning，缺必需文档或断链是 error。真正的冲突
+   用一条 `[[exempt]]` 记录（一个检查、一个路径、一个理由、一个到期日），而不是给
+   整个项目关掉检查。
+2. **提交骨架之后跑 `flow.py init --baseline`。** 它把 `HEAD` 记成
+   `[reconcile] baseline`；从此 `reconcile` 只报告绕开流程的改动，不再把接入前的历史
+   算作欠账。
+3. **第一个条目应当是收敛事实的那个。** 盘点哪些事实没有唯一归口、并给它们各建一处
+   权威，是给后面所有条目付账的条目：它产出的设计模板会被后续条目照抄。
+
+不做任何回填：不补造追溯条目，不重写历史。确实等不及条目的改动，用发布 `--note`
+记录欠账，`reconcile` 会让它一直可见。
+
 ## 仓库结构
 
 ```text
@@ -93,11 +111,11 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
   references/               不变量 + 按情境加载的细则
   templates/                item / design / test-report / implementation / release / retro / decision
   extensions/               随 skill 分发的扩展（go-service、security-scan、deploy-lane）
-  scripts/flow.py           new / claim / whoami / status / check / design /
+  scripts/flow.py           init / new / claim / whoami / status / check / design /
                             design-ready / gate / done / drop / handoff / archive /
                             unarchive / release / reconcile / extensions
   scripts/flowlib/          profile、身份、产物解析、检查、文档卫生、门禁账本、
-                            交接提示词、归档、命令执行、原子写入与写者锁
+                            交接提示词、归档、命令执行、项目脚手架、原子写入与写者锁
   scripts/tests/            单元测试 + 端到端验收
 examples/minimal/           可直接跑的单仓库示例项目
 ```
@@ -106,6 +124,7 @@ examples/minimal/           可直接跑的单仓库示例项目
 
 | 确定性（`flow.py`） | 模型 |
 |---|---|
+| 脚手架：profile、入口文档、`AGENTS.md` 路由、主线分支 | 项目实际上是什么 |
 | 时间有序的 id 分配、目录脚手架 | 澄清提问、权衡取舍 |
 | frontmatter / AC / 批次解析 | 设计叙述与图示 |
 | 状态推导 | 批次拆分 |
@@ -183,9 +202,10 @@ flow.py extensions                     # 每个扩展贡献了什么
 
 ## 状态
 
-当前版本已实现 `new`、`claim`、`whoami`、`status`（含 `--stale`）、`check`、
-`design`、`design-ready`、`gate`、`done`、`drop`、`handoff`、`archive`、
-`unarchive`、`release`、`reconcile`、`extensions`，模板（含 `decision.md`）、
+当前版本已实现 `init`（含 `--adopt` 与 `--baseline`）、`new`、`claim`、`whoami`、
+`status`（含 `--stale`）、`check`、`design`、`design-ready`、`gate`、`done`、
+`drop`、`handoff`、`archive`、`unarchive`、`release`、`reconcile`、`extensions`，
+模板（含 `decision.md`）、
 不变量文档、文档卫生检查、索引图连通、决策链、带到期日的豁免台账、累计证据校验
 （`done` 拒绝任何缺少通过报告、缺少记录在案的 full level PASS、或缺少身份的条目）、
 有序批次图、风险路径设计门、按克隆记录的门禁账本、发布记账与欠账分离、三个随附扩展，

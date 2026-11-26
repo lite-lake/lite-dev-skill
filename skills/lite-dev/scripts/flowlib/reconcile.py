@@ -46,15 +46,25 @@ def _bookkeeping(profile: Profile, paths: list[str]) -> bool:
     """True when a commit only touches the flow's own record stores.
 
     Every release writes a record and tells the operator to commit it; every
-    archive move is a commit too. Those commits cannot carry a work item, so
-    treating them as debt guarantees a permanent false positive and teaches
-    people to type filler notes. They stay visible in `bookkeeping`.
+    archive move is a commit too; and adopting the flow changes the profile.
+    Those commits cannot carry a work item, so treating them as debt guarantees
+    a permanent false positive and teaches people to type filler notes. They
+    stay visible in `bookkeeping`. Risk paths are reported before this check, so
+    a profile change that touches one is still named.
     """
     if not paths:
         return False
+    try:
+        profile_path = profile.path.relative_to(profile.root).as_posix()
+    except ValueError:
+        profile_path = ""
+    stores = (
+        profile.release_path.relative_to(profile.root).as_posix(),
+        profile.work_path.relative_to(profile.root).as_posix(),
+    )
     return all(
-        _under(path, profile.release_path.relative_to(profile.root).as_posix())
-        or _under(path, profile.work_path.relative_to(profile.root).as_posix())
+        any(_under(path, store) for store in stores)
+        or (profile_path and path == profile_path)
         for path in paths
     )
 

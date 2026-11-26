@@ -105,7 +105,12 @@ mechanics:
 `[docs] check_links = false` and `zero_fact = false` are migration switches, not
 settings. Prefer one `[[exempt]]` entry per problem: it names the path, records
 why, and expires. A project that still uses a global switch has to say so in its
-own `AGENTS.md`, because the next session will otherwise assume the checks ran.
+own `AGENTS.md`, because the next session will otherwise assume the checks ran —
+and `check` now reports the switch on every run, so the reminder cannot be lost.
+
+The same failure with extra steps is an enabled check that inspects nothing:
+`zero_fact = true` with no `README.md` or `AGENTS.md` in `[docs] required`.
+`check` reports that as inert instead of passing quietly.
 
 ## Archiving
 

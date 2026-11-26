@@ -566,11 +566,43 @@ def decisions_errors(profile: Profile) -> list[str]:
     return errors
 
 
+def switch_warnings(profile: Profile) -> list[str]:
+    """A check that is off, or on but inert, must say so on every run.
+
+    `check_links = false` and `zero_fact = false` predate `[[exempt]]` and are
+    migration switches, not settings. Leaving them unreported is how a project
+    ends up believing a check ran. An enabled check with no entry document in
+    `[docs] required` is the same failure with extra steps: nothing fails, and
+    nothing is inspected.
+    """
+    warnings: list[str] = []
+    if not profile.docs_check_links:
+        warnings.append(
+            "[docs] check_links = false: relative-link validation is off for this "
+            "project; replace it with [[exempt]] entries (one path, a reason, an "
+            "expiry) and declare the switch in AGENTS.md"
+        )
+    if not profile.docs_zero_fact:
+        warnings.append(
+            "[docs] zero_fact = false: entry documents may pin versions, ports, "
+            "dates, and counts; replace it with [[exempt]] entries and declare the "
+            "switch in AGENTS.md"
+        )
+    if profile.docs_zero_fact and not _entry_docs(profile):
+        warnings.append(
+            "zero_fact is enabled but [docs] required lists no entry document "
+            "(README.md or AGENTS.md), so the check inspects nothing; add one to "
+            "[docs] required"
+        )
+    return warnings
+
+
 def problems(profile: Profile) -> tuple[list[str], list[str]]:
     """All document checks, each behind its profile toggle."""
     exempt = _Exemptions(profile)
     errors: list[str] = []
     warnings: list[str] = []
+    warnings.extend(switch_warnings(profile))
     if profile.docs_check_links:
         errors.extend(link_errors(profile, exempt))
     errors.extend(heading_errors(profile, exempt))

@@ -17,7 +17,7 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.3.7,<0.4"
+requires = ">=0.3.8,<0.4"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of
@@ -111,6 +111,10 @@ confirm_risk_paths = false
 [reconcile]
 # Commit paths that deserve attention when a commit has no work item.
 risk_paths = []
+# Optional baseline for a project with no release record yet: the commit
+# adoption started from. `reconcile` then inspects baseline..HEAD and never
+# blocks. `flow.py init --baseline` writes it on a clean tree.
+# baseline = "<commit>"
 
 [extensions]
 # Declarative add-ons. Resolved from `dir` first, then from the skill's

@@ -98,6 +98,27 @@ def branch(root: Path) -> str:
     return _run(root, "branch", "--show-current").strip()
 
 
+def default_branch(root: Path) -> str:
+    """The branch to record a release on: current, else the remote's default.
+
+    A scaffold run happens before any release, so guessing is allowed here but
+    silent guessing is not: `flow.py init` prints what it detected, and the
+    project can correct the profile.
+    """
+    try:
+        current = branch(root)
+    except GitError:
+        current = ""
+    if current:
+        return current
+    process = _exec(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if process.returncode == 0:
+        remote = process.stdout.strip()
+        if remote.startswith("origin/"):
+            return remote[len("origin/"):]
+    return "main"
+
+
 def upstream_counts(root: Path) -> tuple[int, int] | None:
     """(ahead, behind) against the configured upstream; None when there is none.
 

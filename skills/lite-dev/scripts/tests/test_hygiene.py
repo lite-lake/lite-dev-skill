@@ -196,6 +196,24 @@ class HygieneTest(unittest.TestCase):
         self.assertIn("expired on 2000-01-01", output)
         self.assertIn("link target does not exist", output)
 
+    def test_a_disabled_switch_is_reported_on_every_run(self) -> None:
+        self.set_profile(extra_docs="check_links = false\nzero_fact = false\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("check_links = false", output)
+        self.assertIn("zero_fact = false", output)
+        self.assertIn("[[exempt]]", output)
+
+    def test_zero_fact_without_an_entry_document_is_reported_as_inert(self) -> None:
+        profile = PROFILE.format(extra_docs="", extra_root="").replace(
+            'required = ["README.md", "docs/README.md"]', "required = []"
+        )
+        self.write("docs/flow/profile.toml", profile)
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("zero_fact is enabled but", output)
+        self.assertIn("the check inspects nothing", output)
+
     def test_an_exemption_that_suppresses_nothing_is_reported(self) -> None:
         self.set_profile(
             extra_root=(

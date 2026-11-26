@@ -57,15 +57,18 @@ Three things make it different from a checklist:
    git clone https://github.com/lite-lake/lite-dev-skill.git
    ```
 
-2. **Create a profile.**
+2. **Scaffold the project.**
 
    ```bash
-   mkdir -p docs/flow
-   cp <skill>/profile.template.toml docs/flow/profile.toml
+   python3 <skill>/scripts/flow.py init
    ```
 
-   Edit `commands`, `gate`, `mainline`, `[flow] requires`, and `docs.required`.
-   This is the only file that contains project-specific facts.
+   It writes `docs/flow/profile.toml` (pinned to this install's version, with the
+   detected mainline), the required entry documents, and a routing block in
+   `AGENTS.md` (after the title when one exists). Existing files are never
+   replaced, and it ends by running `check` and printing the next step. Edit
+   `commands`, `gate`, and `[design] risk_paths`: the profile is the only file
+   that contains project-specific facts.
 
 3. **Set your identity.** One value per person, on every machine:
 
@@ -89,6 +92,27 @@ Three things make it different from a checklist:
    python3 <skill>/scripts/flow.py check
    ```
 
+## Adopting an existing project
+
+A project that already has code, tests, and opinions does not start over. The
+loop begins at the next change, and the ramp is explicit:
+
+1. **`flow.py init --adopt`.** It keeps every file it finds, inserts the routing
+   block into `AGENTS.md`, and reports the existing tree as it is: drift is a
+   warning, a missing required document or a broken link is an error. Silence
+   each real conflict with one `[[exempt]]` (a check, a path, a reason, an
+   expiry) instead of turning a check off for the whole project.
+2. **`flow.py init --baseline` after committing the scaffold.** It records `HEAD`
+   as `[reconcile] baseline`; from then on `reconcile` reports only work that
+   bypassed the flow, never the history that predates adoption.
+3. **Make the first item the one that converges facts.** The register of
+   documents with no single authority is the item that pays for the rest: it
+   produces the design template the following items copy.
+
+Nothing is backfilled: no retroactive work items, no rewritten history. If a
+change cannot wait for an item, the release `--note` records the debt, and
+`reconcile` keeps it visible.
+
 ## Repository layout
 
 ```text
@@ -99,12 +123,12 @@ skills/lite-dev/            the installable skill: everything is inside
   references/               invariants + depth, loaded per situation
   templates/                item, design, test report, implementation, release, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
-  scripts/flow.py           new / claim / whoami / status / check / design /
+  scripts/flow.py           init / new / claim / whoami / status / check / design /
                             design-ready / gate / done / drop / handoff / archive /
                             unarchive / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
                             gate ledger, handoff, archive, command runner,
-                            atomic writes and the writer lock
+                            scaffolding, atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
 examples/minimal/           a working single-repo project
 ```
@@ -113,6 +137,7 @@ examples/minimal/           a working single-repo project
 
 | Deterministic (`flow.py`) | Model |
 |---|---|
+| scaffolding: profile, entry documents, `AGENTS.md` router, mainline | what the project actually is |
 | time-ordered id allocation, directory scaffold | clarifying questions, trade-offs |
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
@@ -205,9 +230,10 @@ Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 
 ## Status
 
-The current release implements `new`, `claim`, `whoami`, `status` (with
-`--stale`), `check`, `design`, `design-ready`, `gate`, `done`, `drop`, `handoff`,
-`archive`, `unarchive`, `release`, `reconcile`, `extensions`, the templates
+The current release implements `init` (with `--adopt` and `--baseline`), `new`,
+`claim`, `whoami`, `status` (with `--stale`), `check`, `design`, `design-ready`,
+`gate`, `done`, `drop`, `handoff`, `archive`, `unarchive`, `release`,
+`reconcile`, `extensions`, the templates
 (including `decision.md`), the invariants, document hygiene checks, index-graph
 connectivity, decision chains, the expiring exemption ledger, cumulative
 evidence (`done` refuses any item without a passing report, a recorded full-level

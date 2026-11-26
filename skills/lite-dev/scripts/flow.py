@@ -2,6 +2,7 @@
 """lite-dev flow tool.
 
 Usage (from the project root):
+    python3 <skill>/scripts/flow.py init [--adopt] [--baseline]
     python3 <skill>/scripts/flow.py status [--mine] [--stale [--days N]]
     python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
     python3 <skill>/scripts/flow.py check [--work <ID>]
@@ -58,6 +59,7 @@ from flowlib import (  # noqa: E402
     identity,
     reconcile,
     release,
+    scaffold,
     stamp,
 )
 from flowlib import profile as profile_mod  # noqa: E402
@@ -1066,13 +1068,83 @@ def cmd_release(args) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    """Scaffold the profile, the entry documents, and the routing block."""
+    root = Path(args.root).resolve() if args.root else Path.cwd()
+    if not root.is_dir():
+        print(f"error: {root} is not a directory", file=sys.stderr)
+        return 2
+    result = scaffold.apply(
+        root, version=__version__, language=args.language, baseline=args.baseline
+    )
+    print(f"project: {root}")
+    if result.profile_existed:
+        print(f"profile: {scaffold.relative(root, root / scaffold.PROFILE_REL)} (kept)")
+    else:
+        print(f"profile: {scaffold.relative(root, root / scaffold.PROFILE_REL)} (created)")
+    if result.wrote:
+        print(f"wrote:   {', '.join(result.wrote)}")
+    if result.kept:
+        print(f"kept:    {', '.join(result.kept)}")
+    for note in result.notes:
+        print(f"note:    {note}")
+
+    profile = profile_mod.load(root / scaffold.PROFILE_REL)
+    errors, warnings = checks.check_project(profile)
+    if errors:
+        print(f"check: FAIL — {len(errors)} error(s), {len(warnings)} warning(s); errors block")
+    else:
+        print(f"check: PASS — no errors ({len(warnings)} warning(s); warnings do not block)")
+    _print_issues(errors, warnings)
+
+    resolved = identity.try_resolve(root)
+    if resolved is None:
+        print('identity: none — run `git config --global lite-dev.owner "Your Name"`')
+    else:
+        print(f"identity: {resolved[0]} (from {resolved[1]})")
+
+    if args.adopt:
+        print(
+            "\nadopt:\n"
+            "  1. Keep the existing tree. Drift is a warning; a missing required\n"
+            "     document or a broken link is an error. Silence each real conflict\n"
+            '     with [[exempt]] (check = "links" | "index" | "zero_fact", path,\n'
+            "     reason, until) instead of turning a check off for the project.\n"
+            "  2. Commit the scaffold, then `flow.py init --baseline` so only work\n"
+            "     after adoption is debt; `flow.py reconcile` never blocks.\n"
+            "  3. Make the first item the one that converges the facts with no single\n"
+            "     authority, not a feature."
+        )
+    else:
+        print(
+            "\nnext:\n"
+            f'  {sys.executable} {SKILL_DIR / "scripts" / "flow.py"} new '
+            '--title "..." --type REQ --size S'
+        )
+    return 0 if not errors else 1
+
+
 def cmd_reconcile(args) -> int:
     profile = _load_profile(args)
-    if not profile.release_channels:
-        print("no release channels configured; add [release] channels in the profile")
-        return 2
     channel = args.channel
-    if not channel:
+    baseline = (args.since or profile.reconcile_baseline or "").strip()
+    if not profile.release_channels:
+        if args.channel:
+            print(
+                f"error: unknown channel '{args.channel}'; no channels are configured",
+                file=sys.stderr,
+            )
+            return 2
+        if not baseline:
+            print(
+                "error: no release channels and no baseline; set "
+                '[reconcile] baseline = "<commit>" in the profile (or pass --since) '
+                "so the debt of a project without release records can be computed",
+                file=sys.stderr,
+            )
+            return 2
+        channel = "baseline"
+    if channel is None:
         if len(profile.release_channels) == 1:
             channel = profile.release_channels[0]
         else:
@@ -1081,7 +1153,7 @@ def cmd_reconcile(args) -> int:
                 f"{', '.join(profile.release_channels)}"
             )
             return 2
-    if channel not in profile.release_channels:
+    if channel != "baseline" and channel not in profile.release_channels:
         print(
             f"error: unknown channel '{channel}'; configured: "
             f"{', '.join(profile.release_channels)}"
@@ -1089,17 +1161,26 @@ def cmd_reconcile(args) -> int:
         return 2
 
     try:
-        previous = release.tip(profile, channel)
+        previous = None if channel == "baseline" else release.tip(profile, channel)
         since = args.since or (previous.source if previous else None)
-        if args.since and not git.has_commit(profile.root, args.since):
+        if not since and profile.reconcile_baseline:
+            since = profile.reconcile_baseline
+        source = (
+            "--since"
+            if args.since
+            else f"the {channel} watermark"
+            if previous
+            else "[reconcile] baseline"
+        )
+        if since and not git.has_commit(profile.root, since):
             raise FlowError(
-                f"unknown commit {args.since[:7]}; it is not in this clone. "
+                f"unknown commit {since[:7]} from {source}; it is not in this clone. "
                 "Fetch first, or pass a commit from this history."
             )
         if since and not git.is_ancestor(profile.root, since, git.head(profile.root)):
             raise FlowError(
-                f"the channel watermark {since[:7]} is not an ancestor of HEAD; "
-                "this clone is behind or on a different history. Fetch and pull."
+                f"{source} {since[:7]} is not an ancestor of HEAD; this clone is "
+                "behind or on a different history. Fetch and pull."
             )
         debt = reconcile.collect(profile, channel, since)
     except (git.GitError, FlowError) as exc:
@@ -1189,6 +1270,27 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--profile", default=argparse.SUPPRESS, help="path to docs/flow/profile.toml"
         )
+
+    init_parser = subparsers.add_parser(
+        "init", help="scaffold the profile, entry documents, and the AGENTS.md router"
+    )
+    init_parser.add_argument(
+        "--root", help="project root (defaults to the working directory)"
+    )
+    init_parser.add_argument(
+        "--language", choices=("en", "zh"), default="en", help="prose language"
+    )
+    init_parser.add_argument(
+        "--adopt",
+        action="store_true",
+        help="print the ramp for a project that already has code and documents",
+    )
+    init_parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="record HEAD as [reconcile] baseline; needs a clean tree",
+    )
+    init_parser.set_defaults(func=cmd_init)
 
     new_parser = subparsers.add_parser("new", help="create a work item")
     add_common(new_parser)

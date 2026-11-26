@@ -11,9 +11,9 @@ license: BSD-2-Clause
 
 > Run every command from the project root.
 > There is exactly one flow. Do not invent states, roles, or approvals.
-> Tools: `new`, `status`, `check`, `design`, `design-ready`, `gate`, `done`,
-> `drop`, `claim`, `whoami`, `handoff`, `archive`, `unarchive`, `release`,
-> `reconcile`, `extensions`.
+> Tools: `init`, `new`, `status`, `check`, `design`, `design-ready`, `gate`,
+> `done`, `drop`, `claim`, `whoami`, `handoff`, `archive`, `unarchive`,
+> `release`, `reconcile`, `extensions`.
 
 ## 0. Four principles
 
@@ -37,6 +37,7 @@ Never edit a status by hand.
 
 | Situation | Read | Run |
 |---|---|---|
+| First session in a project | — | `init` (then `status`) |
 | Any task starts | [references/clarify.md](references/clarify.md) | `flow.py status` |
 | S, one session | nothing else | `new` → edit → `test-report` → `check` → `gate --level l3 --work <ID>` → `done` |
 | M, one session with a design | [references/one-shot-vs-two-phase.md](references/one-shot-vs-two-phase.md) | `new` → `design` → `design-ready` → implement → `gate` → `done` |
@@ -84,6 +85,7 @@ Phase A is the design session. Phase B is a scheduling session that dispatches
 ## 5. Work item commands
 
 ```bash
+python3 <skill>/scripts/flow.py init [--adopt] [--baseline]
 python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
 python3 <skill>/scripts/flow.py status --mine
 python3 <skill>/scripts/flow.py status --stale [--days N]
@@ -102,6 +104,13 @@ python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```
 
+- `init` writes what is missing and never replaces a file that exists: the
+  profile (this install's version, the detected mainline), the required entry
+  documents, and a routing block in `AGENTS.md` (after the title when one
+  exists). Then it runs `check` and prints the next step. `--adopt` prints the
+  ramp for a project that already has code and documents; `--baseline` records
+  `HEAD` as `[reconcile] baseline` on a clean tree, so history before adoption is
+  a baseline and not debt.
 - `new` allocates `{date}-{type}-{time}` and creates
   `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
   (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
@@ -145,9 +154,11 @@ python3 <skill>/scripts/flow.py extensions
   release that only adds records/archive commits is not debt; a clone behind its
   upstream is refused, and an unfetched clone cannot be detected, so pull first.
   `--confirmed-by` names the authorizer separately from the recorder.
-- `reconcile` reports commits that bypassed the flow; it never blocks. It
-  labels record-only commits as bookkeeping, still flags risky paths that carry
-  an item id, and knows archived item ids.
+- `reconcile` reports commits that bypassed the flow; it never blocks. With no
+  release record yet it uses `[reconcile] baseline` (or `--since`), so a project
+  that adopted the flow mid-history can see its debt; with neither it refuses and
+  names the fix. It labels record-only commits as bookkeeping, still flags risky
+  paths that carry an item id, and knows archived item ids.
 - `extensions` shows what each enabled extension adds, including required docs
   and reconcile risk paths.
 
