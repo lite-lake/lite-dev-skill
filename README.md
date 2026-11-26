@@ -221,7 +221,8 @@ svc_a_test = { dir = "svc-a", run = "go test ./..." }
 - **The gate runs where the change is.** A command with `dir` belongs to a
   repository; the gate scopes to the repositories the change touches (commits,
   then the worktree, then the design's Repo column) and names what it skipped or
-  could not inspect. `gate --repo svc-a` overrides the scope. This is what keeps
+  could not inspect. `gate --repo svc-a` overrides the scope, and
+  `status --repo svc-a` lists the items that repository's history mentions. This is what keeps
   `l1` cheap without weakening it.
 - **Change detection spans repositories.** Every path is prefixed with its
   repository, so `[design] risk_paths = ["svc-a/migrations/"]` is one list for

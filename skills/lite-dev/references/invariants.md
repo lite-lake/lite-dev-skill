@@ -132,6 +132,13 @@ that teaches people to ignore the file.
   own checker.
 - The archive index is the record store's entry point: every archived item has
   one row, and every row resolves to an archived item.
+- A requirement that lives outside the item is the item's input, not a second
+  status: the requirement owns why and what, the item owns how it was executed
+  and what the evidence is, the board owns who holds it, and the requirement's
+  status field is frozen into a pointer once the item exists. A `prd:` pointer
+  that does not resolve is an error. Whether the requirement's prose is current
+  is human, and the check that its status cell names the item is a named debt —
+  not a silent rule.
 - A silence is a record, not a switch: an exception names one check, one path, a
   reason, and an expiry. An expired exception suppresses nothing and is an error.
   A global switch (`check_links`, `zero_fact`) is reported on every run, and an

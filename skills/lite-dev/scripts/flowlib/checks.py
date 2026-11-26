@@ -799,6 +799,37 @@ def layout_problems(profile: Profile) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def repo_warnings(profile: Profile) -> list[str]:
+    """Declared repositories this machine cannot see.
+
+    A workspace is entered from whichever clone you have. A repository that is
+    declared but missing is not an error — you may never need it here — but the
+    gate cannot inspect it, so `check` says so once instead of leaving the next
+    session to discover it from a scope line.
+    """
+    if not profile.workspace:
+        return []
+    warnings: list[str] = []
+    for repo in profile.workspace_repos:
+        root = profile.repo_root(repo.path)
+        if not root.is_dir():
+            warnings.append(
+                f"repository {repo.name} is not checked out here; its changes are "
+                "invisible to the gate on this machine (fetch it, or leave it out of "
+                "[[workspace.repo]] on machines that never use it)"
+            )
+            continue
+        try:
+            if not git.is_repo(root):
+                warnings.append(
+                    f"repository {repo.name} is not a git work tree; the gate cannot "
+                    "read its history or its changes"
+                )
+        except git.GitError as exc:
+            warnings.append(f"repository {repo.name}: {exc}")
+    return warnings
+
+
 def check_project(
     profile: Profile, work: str | None = None
 ) -> tuple[list[str], list[str]]:
@@ -815,6 +846,7 @@ def check_project(
             errors.append(f"missing required document: {relative}")
 
     if work is None:
+        warnings.extend(repo_warnings(profile))
         layout_errors, layout_warnings = layout_problems(profile)
         errors.extend(layout_errors)
         warnings.extend(layout_warnings)

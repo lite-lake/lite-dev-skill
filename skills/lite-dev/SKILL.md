@@ -90,6 +90,7 @@ python3 <skill>/scripts/flow.py init [--adopt] [--baseline]
 python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
 python3 <skill>/scripts/flow.py status --mine
 python3 <skill>/scripts/flow.py status --stale [--days N]
+python3 <skill>/scripts/flow.py status --repo <path>
 python3 <skill>/scripts/flow.py check [--work <ID>]
 python3 <skill>/scripts/flow.py design <ID>
 python3 <skill>/scripts/flow.py design-ready <ID>

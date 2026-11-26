@@ -65,8 +65,9 @@ Scope is decided in this order, and the gate prints which rule it used:
 5. Everything, with a warning. Never silently.
 
 A repository that is declared but not checked out is named as unavailable, and
-the level says it did not inspect it. Missing output is loud; empty output is
-not evidence.
+the level says it did not inspect it. `check` reports the same set once, so the
+gap is visible before a gate run rather than only inside one. Missing output is
+loud; empty output is not evidence.
 
 ## Change detection spans repositories
 
@@ -102,6 +103,28 @@ record stores keep working.
 A change that ships several repositories produces one record per channel on the
 same day. `--record` refuses when the channel's repository or the control
 repository is dirty; another repository being dirty is a warning, not a block.
+
+## Who owns which fact
+
+A workspace usually already has a requirements system and a task board. Adding a
+flow on top creates three places that could each claim to know the status, so the
+split is explicit:
+
+| Fact | Owner | Elsewhere |
+|---|---|---|
+| Why the change exists, and what it should do | the requirement document (a product spec, a ticket) | the item links it |
+| How this change is executed, verified, and what the evidence is | `item.md` / `design.md` / `test-report.md` | links the requirement |
+| Who holds the task right now, across people and machines | the task board | `item.md` `board:` records the id |
+| What shipped, from which commit, with what rollback | `docs/releases/` records | release notes link them |
+
+Two rules follow:
+
+- A requirement document's status field is **frozen into a pointer** once the
+  item exists. Updating it by hand recreates the second authority the item was
+  meant to remove. (Mechanisation candidate: a check that the status cell names
+  the item id. Today this is prose — a declared debt, not a silent rule.)
+- The item's `prd:` must resolve; `check` enforces that much. Whether the
+  requirement's prose is current is still human.
 
 ## Documents in a workspace
 
@@ -148,3 +171,6 @@ holding the name on that machine. `user.name` is still never used, and
 - No second work-item store: items live in the control repository.
 - No task-board integration. An item may carry `prd:` and `board:` pointers, but
   the board remains the authority for who holds a task.
+- `[reconcile] baseline` names a commit in the control repository. A channel
+  bound to another repository has no baseline until it has a release record;
+  use `--since` for its first release.

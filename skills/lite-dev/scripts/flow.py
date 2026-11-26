@@ -361,6 +361,30 @@ def _print_stale(rows: list[dict], note: str, days: int) -> None:
         print(f"  ({note})")
 
 
+def _resolve_repo_arg(profile: profile_mod.Profile, value: str) -> str:
+    """A `--repo` value as a declared repository path; `.` is the control repo."""
+    clean = value.strip().rstrip("/")
+    if clean in (".", "./", ""):
+        clean = profile.control_path
+    known = {repo.path for repo in profile.workspace_repos}
+    if clean not in known:
+        raise FlowError(
+            f"--repo {value!r} is not a declared repository; known: "
+            + ", ".join(sorted(repo.name for repo in profile.workspace_repos))
+        )
+    return clean
+
+
+def _mentions(repo_root: Path, item_id: str) -> bool:
+    """True when the repository's history mentions the item."""
+    try:
+        if not git.is_repo(repo_root) or not git.head(repo_root):
+            return False
+        return bool(git.commits_matching(repo_root, item_id))
+    except git.GitError:
+        return False
+
+
 def cmd_status(args) -> int:
     profile = _load_profile(args)
     items = artifacts.all_items(profile)
@@ -369,6 +393,15 @@ def cmd_status(args) -> int:
         mine = identity.resolve_for(profile, None)
         items = [
             item for item in items if identity.same(item.meta.get("owner") or "", mine)
+        ]
+
+    repo_filter = ""
+    if getattr(args, "repo", None):
+        repo_filter = _resolve_repo_arg(profile, args.repo)
+        items = [
+            item
+            for item in items
+            if item.id and _mentions(profile.repo_root(repo_filter), item.id)
         ]
 
     counts: dict[str, int] = {}
@@ -448,6 +481,8 @@ def cmd_status(args) -> int:
 
     print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
     print(f"  lite-dev {__version__}")
+    if repo_filter or getattr(args, "repo", None):
+        print(f"  filter  repo {repo_filter or '.'}")
     if profile.workspace:
         control = profile.control_path or "."
         print(f"  control {control}")
@@ -1479,6 +1514,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument(
         "--days", type=int, default=30, help="staleness threshold in days (default 30)"
+    )
+    status_parser.add_argument(
+        "--repo",
+        help="only items whose history mentions them in this repository (. is the "
+        "control repo)",
     )
     status_parser.add_argument("--json", action="store_true", help="machine-readable output")
     status_parser.set_defaults(func=cmd_status)

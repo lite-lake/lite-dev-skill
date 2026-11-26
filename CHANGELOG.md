@@ -2,6 +2,41 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.4.1 — 2026-11-27
+
+The workspace release left three rough edges and one gap in the prose. This
+release rounds them off; no protocol change.
+
+### Added
+
+- `check` reports a declared repository this machine cannot see: not checked out,
+  or not a git work tree. The gate already named it per run; `check` now says it
+  once, at the point where a project is validated.
+- `status --repo <path>` filters the item list to the items that repository's
+  history mentions, and prints which repository is filtering. Release trains and
+  handovers ask this question per repository.
+- A batch handoff (`handoff <ID> --batch Bx`) names the batch's repository in the
+  gate command (`--repo <path>`), so the implement role does not rediscover the
+  scope. A batch whose Repo is `.` keeps the plain command.
+
+### Changed
+
+- `references/workspace.md` gained the authority split a workspace needs:
+  requirement document, item, task board, release record. A requirement's status
+  field is frozen into a pointer once the item exists.
+- `references/invariants.md` records that rule under invariant 9 and names the
+  missing check as a debt, instead of leaving it implicit.
+- `references/collaboration.md` no longer says there is one mainline: a channel
+  records on its own repository's mainline, and `status` in a workspace prints
+  one line per repository.
+- `references/workspace.md` states the one remaining release limit: `[reconcile]
+  baseline` is a commit in the control repository, so a channel bound elsewhere
+  uses `--since` until it has a record.
+
+### Breaking changes
+
+- None. `>=0.4.0,<0.5` still matches; no profile edit is needed.
+
 ## 0.4.0 — 2026-11-27
 
 One project root can now hold several git repositories. A workspace declares its

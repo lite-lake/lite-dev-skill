@@ -493,3 +493,128 @@ class WorkspaceAcceptanceTest(WorkspaceCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+DESIGN = """\
+---
+item: {item}
+status: ready
+---
+
+# {item} design
+
+## Handoff
+
+- Goal: prefix labels
+- Scope: svc-a only
+- Out: no migration
+- Verify: unit tests
+- Rollback: revert the commit
+
+## Diagram
+
+```text
+request -> label
+```
+
+## Confirmation
+
+- Confirmed: yes
+- Date: 2026-01-01
+- Source: conversation
+
+## Approach
+
+Use the prefix from svc-a.
+
+## Batches
+
+| Batch | Goal | Repo | AC | Depends |
+|---|---|---|---|---|
+| B1 | prefix | svc-a | AC01 | — |
+| B2 | passthrough | svc-b | AC02 | B1 |
+
+## Impact
+
+- Contracts: none
+
+## Verification
+
+| AC | Command | Environment | Evidence |
+|---|---|---|---|
+| AC01 | unit | - | test-report |
+| AC02 | unit | - | test-report |
+
+## Rollback
+
+Revert the commit.
+
+## Open Decisions
+
+None
+"""
+
+
+class WorkspaceDiagnosticsTest(WorkspaceCase):
+    def _item(self, size: str = "S", design: bool = False) -> str:
+        item_id = "20260101-REQ-abcdef"
+        directory = self.root / "docs/work/2026-01" / f"{item_id}-t"
+        self.write(
+            f"docs/work/2026-01/{item_id}-t/item.md",
+            "---\n"
+            f"id: {item_id}\ntitle: t\ntype: REQ\npriority: P2\nsize: {size}\n"
+            "mode: one-shot\nowner: o\ncreated: 2026-01-01\nclosed:\nclosed_by:\n---\n\n"
+            "## Clarify\n\n- Status: clarified\n\n"
+            "## AC\n\n- [ ] AC01 a\n- [ ] AC02 b\n",
+        )
+        if design:
+            (directory / "design.md").write_text(
+                DESIGN.format(item=item_id), encoding="utf-8"
+            )
+        return item_id
+
+    def test_check_names_a_repository_that_is_not_checked_out(self) -> None:
+        shutil.rmtree(self.root / "svc-b")
+        result = self.run_flow("check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("svc-b is not checked out here", result.stdout)
+
+    def test_check_is_quiet_when_every_repository_is_present(self) -> None:
+        result = self.run_flow("check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("is not checked out here", result.stdout)
+
+    def test_a_batch_handoff_names_its_repository_in_the_gate_command(self) -> None:
+        item_id = self._item(size="L", design=True)
+        result = self.run_flow("handoff", item_id, "--batch", "B1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("--repo svc-a", result.stdout)
+
+    def test_a_repository_that_is_not_a_work_tree_is_reported(self) -> None:
+        shutil.rmtree(self.root / "svc-b/.git")
+        result = self.run_flow("check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("svc-b is not a git work tree", result.stdout)
+
+    def test_status_repo_filters_items_by_history(self) -> None:
+        item_id = self._item()
+        self.write("svc-a/marker.txt", "x\n")
+        git(self.root / "svc-a", "add", "-A")
+        git(self.root / "svc-a", "commit", "-qm", f"work {item_id}")
+        self.write("docs/work/2026-01/x.txt", "x\n")
+        git(self.root / "docs", "add", "-A")
+        git(self.root / "docs", "commit", "-qm", "item")
+
+        mine = self.run_flow("status", "--repo", "svc-a")
+        self.assertEqual(mine.returncode, 0, mine.stdout + mine.stderr)
+        self.assertIn(item_id, mine.stdout)
+        self.assertIn("filter  repo svc-a", mine.stdout)
+
+        other = self.run_flow("status", "--repo", "svc-b")
+        self.assertEqual(other.returncode, 0, other.stdout + other.stderr)
+        self.assertNotIn(item_id, other.stdout)
+
+    def test_status_repo_refuses_an_undeclared_repository(self) -> None:
+        result = self.run_flow("status", "--repo", "nope")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not a declared repository", result.stdout)

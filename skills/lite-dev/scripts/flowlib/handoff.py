@@ -208,6 +208,12 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
                 depends=_field(row, "Depends", "依赖"),
             )
         )
+        # A batch that names a repository gets a gate command for that repository:
+        # the implement role should not have to rediscover the scope, and `l1`
+        # stays cheap when the batch is one repository of several.
+        batch_repo = _field(row, "Repo", "仓库", default="")
+        if batch_repo not in {"", "-", "—", "."}:
+            gate = f"{gate} --repo {shlex.quote(batch_repo)}"
         lines.append("")
         lines.append(words["batch_rules"])
         for key in ("batch_rule_scope", "batch_rule_commit", "batch_rule_gap"):

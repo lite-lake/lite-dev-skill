@@ -1,7 +1,8 @@
 # Teams, machines, and parallel sessions
 
-lite-dev assumes a trunk-based flow: one mainline, short-lived branches merged
-quickly, everyone running the gate. Coordination is files plus git; there is no
+lite-dev assumes a trunk-based flow: one mainline per repository, short-lived
+branches merged quickly, everyone running the gate. A workspace with several
+repositories has one mainline each; a channel names the repository it records. Coordination is files plus git; there is no
 server and no lease. Four rules make that safe.
 
 ## Identity
@@ -95,8 +96,9 @@ with different rules.
 
 ## Releases
 
-- Only the `[release] mainline` branch may record. A feature branch, a detached
-  HEAD, or a channel branch is refused.
+- Only a channel's mainline branch may record: its `[[release.channel]]`
+  `mainline`, or `[release] mainline` when the channel does not name one. A
+  feature branch, a detached HEAD, or a channel branch is refused.
 - The watermark is the ancestry tip of the channel's records, not the newest
   filename. A record whose `source` is not in your clone means "fetch first".
 - Your HEAD must descend from the recorded tip, and `release --record` refuses
@@ -122,10 +124,15 @@ with different rules.
    collides), but your `status` is otherwise blind to teammates' work.
 4. `status` prints `checkout <branch> <sha> (upstream: behind N, ahead M)` from
    the remote-tracking ref, so it costs no network and is only as fresh as your
-   last fetch. `behind 0` on a clone that has not fetched proves nothing.
+   last fetch. In a workspace it prints one `repos` line instead — control,
+   then each declared repository with its branch, HEAD, distance, and dirty
+   count — and says which declared repositories are not checked out here.
+   `status --repo <path>` narrows the item list to the ones that repository's
+   history mentions. `behind 0` on a clone that has not fetched proves nothing.
 5. Never record a release from a machine that has not pulled the last record.
 6. `status` reflects the current checkout only; switch branches or pull before
-   asking where an item stands. `status --json` is the same data for a script or
+   asking where an item stands. In a workspace a stale repository is visible as
+   `behind N` on its own line. `status --json` is the same data for a script or
    a dashboard. "Work is never half-done on main" stays a human rule.
 
 ## Conflicts
