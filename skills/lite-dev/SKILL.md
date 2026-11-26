@@ -11,8 +11,8 @@ license: BSD-2-Clause
 
 > Run every command from the project root.
 > There is exactly one flow. Do not invent states, roles, or approvals.
-> Tools: `new`, `status`, `check`, `design-ready`, `gate`, `done`, `release`,
-> `reconcile`, `extensions`.
+> Tools: `new`, `status`, `check`, `design-ready`, `gate`, `done`, `claim`,
+> `whoami`, `release`, `reconcile`, `extensions`.
 
 ## 0. Four principles
 
@@ -81,6 +81,7 @@ python3 <skill>/scripts/flow.py design-ready <ID>
 python3 <skill>/scripts/flow.py gate --level l1 --work <ID>
 python3 <skill>/scripts/flow.py claim <ID>
 python3 <skill>/scripts/flow.py done <ID>
+python3 <skill>/scripts/flow.py whoami
 python3 <skill>/scripts/flow.py release --channel staging
 python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
@@ -94,8 +95,12 @@ python3 <skill>/scripts/flow.py extensions
 - `design-ready` refuses an incomplete design and writes `status: ready`.
 - `gate` validates the item under `--work` (or the whole project), then runs the
   profile's commands for a level.
-- `claim` reassigns the owner; commit it so teammates see the change.
-- `done` refuses unchecked AC and a missing required design.
+- `claim` reassigns the owner; commit it so teammates see the change. Another
+  person's open item needs `--takeover`.
+- `done` refuses unchecked AC and a missing required design; it records
+  `closed_by` and warns when the closer is not the owner.
+- `whoami` prints the resolved identity and where it came from; run it on every
+  machine.
 - `release` plans; `--record` runs the gate and writes the channel record.
 - `reconcile` reports commits that bypassed the flow; it never blocks.
 - `extensions` shows what each enabled extension adds.
@@ -170,6 +175,7 @@ An implementer saying "tested" is not evidence.
 - Listing only "this round" of batches and deferring the rest.
 - Leaving half-done work on main without a flag.
 - Guessing which item an ambiguous id means, or editing an id by hand.
+- Taking over someone's open item without `--takeover` and a reason.
 - Editing a recorded release's `source` or `previous`.
 - Force push, rewriting shared history, committing secrets.
 - Weakening a core rule through an extension.

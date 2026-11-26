@@ -85,6 +85,25 @@ def branch(root: Path) -> str:
     return _run(root, "branch", "--show-current").strip()
 
 
+def upstream_counts(root: Path) -> tuple[int, int] | None:
+    """(ahead, behind) against the configured upstream; None when there is none.
+
+    Read from the remote-tracking ref, so it never touches the network: a clone
+    that has not fetched is told what its last fetch saw, not what is on the
+    server now.
+    """
+    process = _exec(root, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+    if process.returncode != 0:
+        return None
+    parts = process.stdout.split()
+    if len(parts) != 2:
+        return None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+
+
 def dirty(root: Path) -> list[str]:
     return [line for line in _run(root, "status", "--porcelain").splitlines() if line.strip()]
 

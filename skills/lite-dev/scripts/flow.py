@@ -9,6 +9,7 @@ Usage (from the project root):
     python3 <skill>/scripts/flow.py gate --level l1 [--work <ID>]
     python3 <skill>/scripts/flow.py claim <ID>
     python3 <skill>/scripts/flow.py done <ID>
+    python3 <skill>/scripts/flow.py whoami
     python3 <skill>/scripts/flow.py release --channel staging
     python3 <skill>/scripts/flow.py reconcile
     python3 <skill>/scripts/flow.py extensions
@@ -190,6 +191,23 @@ def cmd_new(args) -> int:
     return 0
 
 
+def _checkout(profile: profile_mod.Profile) -> dict | None:
+    """What this checkout knows: branch, HEAD, and distance from its last fetch."""
+    try:
+        if not git.is_repo(profile.root):
+            return None
+        counts = git.upstream_counts(profile.root)
+        return {
+            "branch": git.branch(profile.root),
+            "head": git.head(profile.root)[:7],
+            "ahead": counts[0] if counts else 0,
+            "behind": counts[1] if counts else 0,
+            "upstream": counts is not None,
+        }
+    except git.GitError:
+        return None
+
+
 def cmd_status(args) -> int:
     profile = _load_profile(args)
     items = artifacts.all_items(profile)
@@ -197,15 +215,67 @@ def cmd_status(args) -> int:
     if args.mine:
         mine = identity.resolve(profile.root, None)
         items = [
-            item
-            for item in items
-            if (item.meta.get("owner") or "").strip().casefold() == mine.casefold()
+            item for item in items if identity.same(item.meta.get("owner") or "", mine)
         ]
-    if not items:
-        print(f"{profile.name}: no work items" if not mine else f"{profile.name}: no items for {mine}")
+
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.status] = counts.get(item.status, 0) + 1
+    checkout = _checkout(profile)
+    items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "project": profile.name,
+                    "profile": str(profile.path.relative_to(profile.root)),
+                    "checkout": checkout,
+                    "mine": mine or None,
+                    "items": [
+                        {
+                            "id": item.id,
+                            "title": item.meta.get("title", ""),
+                            "type": item.meta.get("type", ""),
+                            "size": item.size,
+                            "mode": item.mode,
+                            "status": item.status,
+                            "owner": item.meta.get("owner", ""),
+                            "closed_by": item.meta.get("closed_by", ""),
+                            "ac_done": item.ac_done,
+                            "ac_total": item.ac_total,
+                            "design": (
+                                "ready"
+                                if item.design_status == "ready"
+                                else ("draft" if item.design_path else "")
+                            ),
+                            "path": str(item.directory.relative_to(profile.root)),
+                        }
+                        for item in items
+                    ],
+                    "counts": {key: counts[key] for key in STATUS_ORDER if key in counts},
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
-    items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
+    print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
+    if checkout:
+        label = checkout["branch"] or "detached HEAD"
+        if checkout["upstream"]:
+            print(
+                f"  checkout {label} {checkout['head']} "
+                f"(upstream: behind {checkout['behind']}, ahead {checkout['ahead']})"
+            )
+        else:
+            print(f"  checkout {label} {checkout['head']} (no upstream; this clone only)")
+
+    if not items:
+        print("  no work items" if not mine else f"  no items for {mine}")
+        return 0
+
     rows = []
     for item in items:
         design = "ready" if item.design_status == "ready" else ("draft" if item.design_path else "-")
@@ -223,7 +293,6 @@ def cmd_status(args) -> int:
         )
     headers = ["ID", "TYPE", "SIZE", "MODE", "STATUS", "OWNER", "AC", "DESIGN"]
     widths = [max(len(str(row[i])) for row in rows + [headers]) for i in range(len(headers))]
-    print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
     print("  ".join(header.ljust(widths[i]) for i, header in enumerate(headers)))
     for row in rows:
         print("  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
@@ -327,6 +396,7 @@ def cmd_gate(args) -> int:
 def cmd_done(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
+    closer = identity.try_resolve(profile.root, None)
 
     closed = (item.meta.get("closed") or "").strip()
     if closed:
@@ -345,15 +415,27 @@ def cmd_done(args) -> int:
             print(f"  - {error}")
         return 1
 
+    owner = (item.meta.get("owner") or "").strip()
+    if closer and owner and not identity.same(owner, closer[0]):
+        print(
+            f"warn: {item.id} is owned by {owner}; closing as {closer[0]} "
+            "(the verifier may close; `closed_by` records it)"
+        )
+
     with fsio.project_lock(profile.root):
         current = artifacts.find_item(profile, item.id)
         if (current.meta.get("closed") or "").strip():
             print(f"{item.id} is already closed ({current.meta['closed'].strip()})")
             return 0
-        artifacts.set_frontmatter_value(current.path, "closed", checks.today())
+        updates = {"closed": checks.today()}
+        if closer:
+            updates["closed_by"] = closer[0]
+        artifacts.set_frontmatter_values(current.path, updates)
     print(f"done {item.id} ({checks.today()})")
     print(f"  AC {item.ac_done}/{item.ac_total}")
     print(f"  design: {item.design_status or '-'}")
+    if closer:
+        print(f"  closed by: {closer[0]}")
     print(f"  {item.path.relative_to(profile.root)}")
     return 0
 
@@ -362,15 +444,39 @@ def cmd_claim(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
     owner = identity.resolve(profile.root, args.owner)
-    previous = (item.meta.get("owner") or "").strip() or "unowned"
-    if previous.casefold() == owner.casefold():
-        print(f"{item.id} is already owned by {previous}")
+    previous = (item.meta.get("owner") or "").strip()
+    if identity.same(previous, owner):
+        print(f"{item.id} is already owned by {previous or owner}")
         return 0
+    closed = (item.meta.get("closed") or "").strip()
+    if previous and not closed and not args.takeover:
+        raise FlowError(
+            f"{item.id} is owned by {previous} and is not closed ({item.status}); "
+            "pass --takeover to reassign it, or ask the owner first. "
+            "Ownership is a signal, not a lock: read the item before taking it."
+        )
     with fsio.project_lock(profile.root):
         current = artifacts.find_item(profile, args.id)
         artifacts.set_frontmatter_value(current.path, "owner", owner)
-    print(f"claimed {item.id}: {previous} -> {owner}")
+    print(f"claimed {item.id}: {previous or 'unowned'} -> {owner}")
     print("commit the change so teammates see the claim")
+    return 0
+
+
+def cmd_whoami(args) -> int:
+    profile = _load_profile(args)
+    found = identity.try_resolve(profile.root, args.owner)
+    if found is None:
+        print("identity: (none)")
+        print(
+            f"set one with --owner, ${identity.ENV_VAR}, or "
+            f"`git config --global {identity.CONFIG_KEY} \"Your Name\"`"
+        )
+        return 1
+    owner, source = found
+    print(f"identity: {owner}")
+    print(f"source:   {source}")
+    print(f"project:  {profile.name} ({profile.path.relative_to(profile.root)})")
     return 0
 
 
@@ -635,6 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status", help="show derived status for all items")
     add_common(status_parser)
     status_parser.add_argument("--mine", action="store_true", help="only items owned by you")
+    status_parser.add_argument("--json", action="store_true", help="machine-readable output")
     status_parser.set_defaults(func=cmd_status)
 
     check_parser = subparsers.add_parser("check", help="validate artifacts and links")
@@ -664,7 +771,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(claim_parser)
     claim_parser.add_argument("id")
     claim_parser.add_argument("--owner", help="new owner (defaults to your identity)")
+    claim_parser.add_argument(
+        "--takeover",
+        action="store_true",
+        help="reassign an active item that another person owns",
+    )
     claim_parser.set_defaults(func=cmd_claim)
+
+    whoami_parser = subparsers.add_parser(
+        "whoami", help="show the identity flow.py resolves and where it comes from"
+    )
+    add_common(whoami_parser)
+    whoami_parser.add_argument("--owner", help="identity to report instead of yours")
+    whoami_parser.set_defaults(func=cmd_whoami)
 
     release_parser = subparsers.add_parser("release", help="plan or record a channel release")
     add_common(release_parser)

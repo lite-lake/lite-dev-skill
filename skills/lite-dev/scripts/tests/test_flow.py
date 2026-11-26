@@ -154,7 +154,9 @@ None
 class BaseCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        # Resolve once: on macOS /var is a symlink to /private/var and
+        # profile.load() resolves the same way.
+        self.root = Path(self._tmp.name).resolve()
         self.profile_path = self.root / "docs/flow/profile.toml"
         self._write(self.profile_path, PROFILE)
         for relative in ("README.md", "AGENTS.md", "docs/README.md"):
@@ -621,12 +623,62 @@ class DoneTest(BaseCase):
 
 
 class IdentityTest(BaseCase):
-    def test_claim_reassigns_the_owner(self) -> None:
+    def test_claim_refuses_another_persons_active_item(self) -> None:
         item = self.make_item()
         code, output = self.run_flow("claim", item.id, "--owner", "bob")
+        self.assertEqual(code, 2)
+        self.assertIn("owned by alice", output)
+        self.assertIn("--takeover", output)
+        self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "alice")
+
+    def test_claim_reassigns_with_takeover(self) -> None:
+        item = self.make_item()
+        code, output = self.run_flow("claim", item.id, "--owner", "bob", "--takeover")
         self.assertEqual(code, 0, output)
         self.assertIn("alice -> bob", output)
         self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "bob")
+
+    def test_claim_of_an_unowned_item_needs_no_takeover(self) -> None:
+        item = self.make_item(owner="")
+        code, output = self.run_flow("claim", item.id, "--owner", "bob")
+        self.assertEqual(code, 0, output)
+        self.assertIn("unowned -> bob", output)
+
+    def test_claim_of_a_closed_item_needs_no_takeover(self) -> None:
+        item = self.make_item(owner="alice", closed="2026-01-02", size="S")
+        code, output = self.run_flow("claim", item.id, "--owner", "bob")
+        self.assertEqual(code, 0, output)
+        self.assertIn("alice -> bob", output)
+
+    def test_whoami_reports_the_source(self) -> None:
+        code, output = self.run_flow("whoami")
+        self.assertEqual(code, 0, output)
+        self.assertIn("identity: alice", output)
+        self.assertIn("source:   LITE_DEV_OWNER", output)
+
+    def test_whoami_without_an_identity_explains_how_to_set_one(self) -> None:
+        with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": ""}):
+            code, output = self.run_flow("whoami")
+        self.assertEqual(code, 1)
+        self.assertIn("identity: (none)", output)
+        self.assertIn("git config --global lite-dev.owner", output)
+
+    def test_done_records_who_closed_and_warns_on_a_different_owner(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S", owner="alice")
+        with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": "bob"}):
+            code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 0, output)
+        self.assertIn("owned by alice; closing as bob", output)
+        closed = artifacts.find_item(self.profile, item.id)
+        self.assertEqual(closed.meta["closed_by"], "bob")
+        self.assertTrue(closed.meta["closed"])
+
+    def test_done_works_without_an_identity_and_writes_no_closer(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": ""}):
+            code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("closed_by", artifacts.read_text(item.path))
 
     def test_status_mine_filters_by_identity(self) -> None:
         self.make_item(item_id="20260101-REQ-aaaaaa", owner="alice")

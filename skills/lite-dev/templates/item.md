@@ -8,6 +8,7 @@ mode: <MODE>
 owner: <OWNER>
 created: <DATE>
 closed:
+closed_by:
 ---
 
 ## Problem

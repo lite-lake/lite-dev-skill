@@ -3,6 +3,7 @@ name = "minimal"
 language = "en"
 docs_dir = "docs"
 work_dir = "docs/work"
+# owners = ["Your Name"]    # optional: check warns about any other spelling
 
 [flow]
 requires = ">=0.3.2,<0.4"

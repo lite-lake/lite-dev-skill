@@ -10,6 +10,7 @@ From this directory:
 ```bash
 SKILL=/path/to/lite-dev-skill/skills/lite-dev
 git config --global lite-dev.owner "Your Name"   # once per person, per machine
+python3 $SKILL/scripts/flow.py whoami            # what this machine resolves
 python3 $SKILL/scripts/flow.py status
 python3 $SKILL/scripts/flow.py new --title "Export CSV" --type REQ --size S
 python3 $SKILL/scripts/flow.py check

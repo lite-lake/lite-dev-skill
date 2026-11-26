@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from . import artifacts
+from . import artifacts, git, identity
 from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile
 
 DESIGN_SECTIONS = (
@@ -234,6 +234,58 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     return warnings
 
 
+def owner_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
+    """One spelling per person, and every owner on the roster when one is set.
+
+    A person on several machines resolves their own identity on each one; a
+    spelling drift there is exactly how `status --mine` starts missing items.
+    """
+    warnings: list[str] = []
+    spellings: dict[str, set[str]] = {}
+    for item in items:
+        owner = (item.meta.get("owner") or "").strip()
+        if owner:
+            spellings.setdefault(identity.normalize(owner), set()).add(owner)
+    for variants in spellings.values():
+        if len(variants) > 1:
+            listed = " / ".join(sorted(variants))
+            warnings.append(
+                f"owners {listed} differ only by case or spacing; use one spelling "
+                "on every machine so `status --mine` sees one person"
+            )
+
+    if profile.owners:
+        allowed = {identity.normalize(owner) for owner in profile.owners}
+        reported: set[str] = set()
+        for item in items:
+            owner = (item.meta.get("owner") or "").strip()
+            if not owner or owner in reported or identity.normalize(owner) in allowed:
+                continue
+            reported.add(owner)
+            warnings.append(
+                f"{item.directory.name}: owner {owner!r} is not in [project] owners "
+                f"({', '.join(profile.owners)}); add them there or fix the spelling"
+            )
+    return warnings
+
+
+def quotepath_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
+    """Non-ASCII slugs read as escapes until `core.quotepath` is off."""
+    if not any(artifacts.CJK_RE.search(item.directory.name) for item in items):
+        return []
+    try:
+        if not git.is_repo(profile.root):
+            return []
+        if git.config_get(profile.root, "core.quotepath").strip().lower() == "false":
+            return []
+    except git.GitError:
+        return []
+    return [
+        "work item directories contain non-ASCII characters; run "
+        "`git config core.quotepath false` so `git status` prints them readably"
+    ]
+
+
 def layout_problems(profile: Profile) -> tuple[list[str], list[str]]:
     """Validate the <work_dir>/<YYYY-MM>/<id>-<slug> layout.
 
@@ -282,6 +334,9 @@ def check_project(
         warnings.extend(layout_warnings)
 
     items = artifacts.all_items(profile)
+    if work is None:
+        warnings.extend(owner_warnings(profile, items))
+        warnings.extend(quotepath_warnings(profile, items))
     by_id: dict[str, list[str]] = {}
     for item in items:
         if item.id:

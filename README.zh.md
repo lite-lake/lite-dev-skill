@@ -68,7 +68,8 @@
    git config --global lite-dev.owner "你的名字"
    ```
 
-   `new` 不猜身份：拿不到 owner 就不建条目。`LITE_DEV_OWNER` 和 `--owner` 可覆盖。
+   `new` 不猜身份：拿不到 owner 就不建条目。`LITE_DEV_OWNER` 和 `--owner` 可覆盖；
+   `flow.py whoami` 显示这台机器上实际生效的身份和来源。
 
 4. **对 Agent 说。**「在这个仓库接入 lite-dev」，或直接说「实现 X」。skill 会在
    实现、修复、设计、发布类请求上触发。
@@ -90,8 +91,8 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
   references/               不变量 + 按情境加载的细则
   templates/                item / design / test-report / implementation / release / retro
   extensions/               随 skill 分发的声明式扩展（go-service）
-  scripts/flow.py           new / claim / status / check / design-ready / gate /
-                            done / release / reconcile / extensions
+  scripts/flow.py           new / claim / whoami / status / check / design-ready /
+                            gate / done / release / reconcile / extensions
   scripts/flowlib/          profile、身份、产物解析、检查、命令执行、
                             原子写入与写者锁
   scripts/tests/            单元测试 + 端到端验收
@@ -138,29 +139,33 @@ flow.py extensions                     # 每个扩展贡献了什么
 
 ## 团队与多台机器
 
-流程只依赖文件和 git：没有服务端、没有锁服务、也不发网络请求。三条规则让它同时
+流程只依赖文件和 git：没有服务端、没有锁服务、也不发网络请求。下面这些规则让它同时
 适配多人、多机与并行 Agent 会话：
 
 - **id 按时间排序，分配不需要协调。** `{date}-{type}-{time}` 把当地当天的毫秒写进
-  id，克隆可以独立分配，id 按创建顺序排列。唯一残留的碰撞是两个创建者落在同一毫秒；
-  `check` 会报重复而不合并。前缀命中两条时是错误并列出候选，工具从不猜。
+  id，克隆可以独立分配，同一时区同一天内 id 按创建顺序排列。唯一残留的碰撞是两个
+  创建者落在同一毫秒；`check` 会报重复而不合并。前缀命中两条时是错误并列出候选，
+  工具从不猜。
 - **归属必须显式。** `owner` 必填，来源是 `--owner`、`$LITE_DEV_OWNER` 或
-  `git config lite-dev.owner`，绝不取 `user.name`。`claim` 接管条目，`status --mine`
-  按人过滤。
+  `git config lite-dev.owner`，绝不取 `user.name`。`whoami` 显示生效值和来源；
+  `claim` 接管条目，`status --mine` 按人过滤。接管别人未关闭的条目需要 `--takeover`，
+  `done` 会写入 `closed_by`，可选的 `[project] owners` 名单让 `check` 报出名单之外的
+  拼写。
 - **发布按提交图排序。** `--record` 只在主线执行；落后的克隆会被拒绝而不是记下更旧
   的 source；读坏或分叉的记录会中止发布。
 
 `gate --work <ID>` 只校验该条目和必需文档，所以同事的半成品不会阻塞你的批次；裸
-`check` 和发布仍然校验全量。写入是原子的（LF 换行、`os.replace`），同一克隆内的写者
-由锁串行化，两个 Agent 会话不会交错读改写。
+`check` 和发布仍然校验全量。`status` 显示分支、HEAD 和相对上次 fetch 的距离
+（`status --json` 给脚本用），且它自己从不 fetch。写入是原子的（LF 换行、
+`os.replace`），同一克隆内的写者由锁串行化，两个 Agent 会话不会交错读改写。
 
 细节见 [collaboration.md](skills/lite-dev/references/collaboration.md)。
 
 ## 状态
 
-当前版本已实现 `new`、`claim`、`status`、`check`、`design-ready`、`gate`、`done`、
-`release`、`reconcile`、`extensions`、模板、不变量文档，以及可运行的单仓库示例。
-计划中：多仓库 workspace profile。
+当前版本已实现 `new`、`claim`、`whoami`、`status`、`check`、`design-ready`、`gate`、
+`done`、`release`、`reconcile`、`extensions`、模板、不变量文档，以及可运行的单仓库
+示例。计划中：多仓库 workspace profile。
 
 版本与破坏性变更见 `CHANGELOG.md`（[中文](CHANGELOG.zh.md)）。
 

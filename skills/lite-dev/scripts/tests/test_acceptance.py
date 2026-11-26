@@ -33,7 +33,7 @@ def item_id(directory: Path) -> str:
 class AcceptanceTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name) / "project"
+        self.root = (Path(self._tmp.name) / "project").resolve()
         shutil.copytree(EXAMPLE, self.root)
 
     def tearDown(self) -> None:
@@ -176,7 +176,7 @@ class AcceptanceTest(unittest.TestCase):
         first_id = self.created_id(
             self.run_flow("new", "--title", "Same Title", "--type", "REQ", "--size", "S")
         )
-        other = Path(self._tmp.name) / "other"
+        other = (Path(self._tmp.name) / "other").resolve()
         shutil.copytree(EXAMPLE, other)
         second_id = self.created_id(
             self.run_flow(

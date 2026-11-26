@@ -110,11 +110,13 @@ partially mechanised.
 
 - Item ids are allocated without coordination: `{date}-{type}-{time}`, where
   `{time}` is the millisecond of the local day. No clone pulls or scans before
-  `new`, and ids sort in creation order. Two allocations that stamp the same
-  millisecond collide; `new` bumps past a code already on disk, and `check`
-  reports a duplicate id rather than merging the two items.
+  `new`, and ids sort in creation order within one local day and timezone. Two
+  allocations that stamp the same millisecond collide; `new` bumps past a code
+  already on disk, and `check` reports a duplicate id rather than merging the
+  two items.
 - Every item records its owner; the owner comes from an explicit identity, never
-  from a machine's `user.name`.
+  from a machine's `user.name`. Reassigning an open item that another person
+  owns requires an explicit takeover, and closing an item records who closed it.
 - Shared facts that must agree across clones — release order, the watermark —
   come from the commit graph, never from a local clock or directory order. The
   id's time code is a label and a sort key, not a watermark.
@@ -122,8 +124,9 @@ partially mechanised.
   stale, or forked release record.
 - **Enforced**: `new` allocates `{time}` and increments it on collision;
   `find_item` refuses an ambiguous id and lists the candidates; `claim` records
-  ownership; `release`/`reconcile` order records by ancestry and stop on a
-  broken chain.
+  ownership and refuses another person's open item without `--takeover`; `done`
+  writes `closed_by`; `release`/`reconcile` order records by ancestry and stop
+  on a broken chain.
 
 ## Compatibility
 

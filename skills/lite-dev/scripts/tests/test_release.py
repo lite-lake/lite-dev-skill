@@ -83,7 +83,7 @@ closed:
 class ReleaseTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.write("docs/flow/profile.toml", PROFILE)
         self.write("README.md", "# release project\n")
         self.write(f"docs/work/2026-01/{ITEM_ID}-demo/item.md", ITEM)
@@ -155,7 +155,7 @@ class ReleaseTest(unittest.TestCase):
             f"source: {source}\n"
             f"previous: {previous}\n"
             "by: tester\n"
-            "tool: 0.3.3\n"
+            f"tool: {flow.__version__}\n"
             "---\n\n# Release\n",
         )
         return self.root / "docs/releases" / name
@@ -212,7 +212,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("channel: staging", text)
         self.assertIn("previous: none", text)
         self.assertIn("by: releaser", text)
-        self.assertIn("tool: 0.3.3", text)
+        self.assertIn(f"tool: {flow.__version__}", text)
         self.assertIn(head, text)
         self.assertIn("PASS l1", text)
         self.assertIn("revert", text)

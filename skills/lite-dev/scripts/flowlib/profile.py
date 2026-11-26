@@ -33,6 +33,7 @@ class Profile:
     path: Path
     name: str
     language: str
+    owners: list[str]
     docs_dir: str
     work_dir: str
     id_format: str
@@ -326,7 +327,9 @@ def load(path: Path | str | None = None) -> Profile:
     extensions = raw.get("extensions") or {}
     flow_table = raw.get("flow") or {}
 
-    _allow_keys(project, ("name", "language", "docs_dir", "work_dir"), "[project]")
+    _allow_keys(
+        project, ("name", "language", "owners", "docs_dir", "work_dir"), "[project]"
+    )
     _allow_keys(id_table, ("format",), "[id]")
     _allow_keys(design, ("required_for", "require_confirmed"), "[design]")
     _allow_keys(docs, ("required",), "[docs]")
@@ -341,6 +344,9 @@ def load(path: Path | str | None = None) -> Profile:
     language = project.get("language", "en")
     if language not in ("en", "zh"):
         raise ProfileError("[project] language must be 'en' or 'zh'")
+
+    owners = _string_list(project.get("owners", []), "[project] owners")
+    owners = list(dict.fromkeys(owner.strip() for owner in owners if owner.strip()))
 
     docs_dir = project.get("docs_dir", "docs")
     work_dir = project.get("work_dir", f"{docs_dir}/work")
@@ -444,6 +450,7 @@ def load(path: Path | str | None = None) -> Profile:
         path=profile_path,
         name=name,
         language=language,
+        owners=owners,
         docs_dir=docs_dir,
         work_dir=work_dir,
         id_format=id_format,

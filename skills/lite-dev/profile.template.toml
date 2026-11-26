@@ -7,6 +7,9 @@
 [project]
 name = "my-project"
 language = "en"            # en | zh — language for prose, not for headings
+# Optional roster of canonical owner spellings. `check` warns about an item
+# owned by anyone else, which is how a typo on one machine gets caught early.
+# owners = ["Alice Chen", "Bob Li"]
 docs_dir = "docs"
 # Items live at <work_dir>/<YYYY-MM>/<id>-<slug>/, filed by their created month.
 work_dir = "docs/work"

@@ -59,7 +59,7 @@ risk_paths = ["migrations/"]
 class ExtensionTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self._tmp.name)
+        self.root = Path(self._tmp.name).resolve()
         self.profile_path = self.root / "docs/flow/profile.toml"
         self.write("README.md", "# r\n")
         self.write("docs/README.md", "# d\n")
@@ -162,7 +162,7 @@ class ExtensionTest(unittest.TestCase):
     def test_extensions_command(self) -> None:
         code, output = self.run_flow("extensions")
         self.assertEqual(code, 0)
-        self.assertIn("lite-dev 0.3.3", output)
+        self.assertIn(f"lite-dev {flow.__version__}", output)
         self.assertIn("demo 1.0.0", output)
         self.assertIn("gate l1 += demo_test", output)
 

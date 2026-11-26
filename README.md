@@ -74,7 +74,7 @@ Three things make it different from a checklist:
    ```
 
    `new` refuses to guess: no owner, no item. `LITE_DEV_OWNER` and `--owner`
-   override it.
+   override it; `flow.py whoami` shows what is in effect on this machine.
 
 4. **Ask the agent.** "Set up lite-dev in this repo", or go straight to
    "implement X". The skill triggers on implementation, fix, design, and release
@@ -97,8 +97,8 @@ skills/lite-dev/            the installable skill: everything is inside
   references/               invariants + depth, loaded per situation
   templates/                item, design, test report, implementation, release, retro
   extensions/               bundled declarative add-ons (go-service)
-  scripts/flow.py           new / claim / status / check / design-ready / gate /
-                            done / release / reconcile / extensions
+  scripts/flow.py           new / claim / whoami / status / check / design-ready /
+                            gate / done / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, command runner,
                             atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
@@ -150,36 +150,41 @@ incompatible `requires` range.
 ## Teams and multiple machines
 
 The flow is files plus git; there is no server, no lock service, and no network
-call. Three rules make that work for several people, several machines, and
+call. These rules make that work for several people, several machines, and
 parallel agent sessions:
 
 - **Ids sort by time and need no coordination.** `{date}-{type}-{time}` encodes
   the millisecond of the local day, so a clone allocates an id alone and ids
-  list in creation order. Two creators stamping the same millisecond is the one
-  collision left; `check` reports the duplicate instead of merging it. A prefix
-  that matches two items is an error with the candidates listed; the tool never
-  guesses.
+  list in creation order within one timezone and day. Two creators stamping the
+  same millisecond is the one collision left; `check` reports the duplicate
+  instead of merging it. A prefix that matches two items is an error with the
+  candidates listed; the tool never guesses.
 - **Ownership is explicit.** `owner` is required and resolved from `--owner`,
   `$LITE_DEV_OWNER`, or `git config lite-dev.owner` — never from `user.name`.
-  `claim` takes over an item and `status --mine` filters.
+  `whoami` shows the value and its source; `claim` takes over an item and
+  `status --mine` filters. Taking over someone's open item needs `--takeover`,
+  `done` records `closed_by`, and an optional `[project] owners` roster makes
+  `check` flag a spelling no one else uses.
 - **Releases are ordered by the commit graph.** `--record` only runs on the
   mainline, a stale clone is refused instead of recording an older source, and
   an unreadable or divergent record stops the release.
 
 `gate --work <ID>` validates that item plus the required documents, so a
 teammate's unfinished item does not block your batch; a bare `check` and a
-release still validate everything. Writes are atomic (LF endings, `os.replace`)
-and local writers are serialized by a per-clone lock, so two agent sessions in
-one checkout cannot interleave a read-modify-write.
+release still validate everything. `status` reports the branch, HEAD, and the
+distance from the last fetch (`status --json` for scripts), and it never
+fetches. Writes are atomic (LF endings, `os.replace`) and local writers are
+serialized by a per-clone lock, so two agent sessions in one checkout cannot
+interleave a read-modify-write.
 
 Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 
 ## Status
 
-The current release implements `new`, `claim`, `status`, `check`, `design-ready`,
-`gate`, `done`, `release`, `reconcile`, `extensions`, the templates, the
-invariants, and a runnable single-repo example. Planned: a multi-repo workspace
-profile.
+The current release implements `new`, `claim`, `whoami`, `status`, `check`,
+`design-ready`, `gate`, `done`, `release`, `reconcile`, `extensions`, the
+templates, the invariants, and a runnable single-repo example. Planned: a
+multi-repo workspace profile.
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

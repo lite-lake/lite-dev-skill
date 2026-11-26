@@ -59,23 +59,29 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
     return meta, match.group(2)
 
 
-def set_frontmatter_value(path: Path, key: str, value: str) -> None:
+def set_frontmatter_values(path: Path, values: dict[str, str]) -> None:
+    """Set several frontmatter keys in one read and one atomic write."""
     text = read_text(path)
     match = FM_RE.match(text.lstrip("\ufeff"))
     if not match:
         raise ValueError(f"{path} has no frontmatter")
     lines = match.group(1).splitlines()
-    pattern = re.compile(rf"^{re.escape(key)}\s*:")
-    for index, line in enumerate(lines):
-        if pattern.match(line):
-            lines[index] = f"{key}: {value}"
-            break
-    else:
-        lines.append(f"{key}: {value}")
+    for key, value in values.items():
+        pattern = re.compile(rf"^{re.escape(key)}\s*:")
+        for index, line in enumerate(lines):
+            if pattern.match(line):
+                lines[index] = f"{key}: {value}"
+                break
+        else:
+            lines.append(f"{key}: {value}")
     fsio.atomic_write_text(
         path,
         "---\n" + "\n".join(lines) + "\n---\n" + match.group(2),
     )
+
+
+def set_frontmatter_value(path: Path, key: str, value: str) -> None:
+    set_frontmatter_values(path, {key: value})
 
 
 def sections(body: str) -> dict[str, str]:

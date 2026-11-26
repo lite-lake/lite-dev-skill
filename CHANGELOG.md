@@ -2,6 +2,46 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.4 — 2026-11-26
+
+Working with other people and on more than one machine: identity drift becomes
+visible, an accidental takeover is refused, and closing an item records who did
+it.
+
+### Added
+
+- `whoami` prints the resolved identity, where it came from (`--owner`,
+  `$LITE_DEV_OWNER`, `git config lite-dev.owner`), and the project.
+- `status --json` emits the checkout, items, and counts for scripts and
+  dashboards. The text output now shows the branch, HEAD, and the behind/ahead
+  distance from the remote-tracking ref; it still never fetches.
+- `check` warns when two owners differ only by case or spacing, and, when
+  `[project] owners` is set, about any owner outside the roster.
+- `check` warns to set `git config core.quotepath false` once an item directory
+  contains non-ASCII characters.
+- `done` writes `closed_by` into `item.md` and warns when the closer is not the
+  owner. The field is optional, so existing items stay valid.
+
+### Changed
+
+- `claim <ID>` now refuses an open item owned by someone else and exits 2;
+  `--takeover` reassigns it. This is a behaviour change, shipped as a patch
+  release on purpose: a project pinned `>=0.3.2,<0.4` picks it up without
+  editing the pin. An unowned or already closed item is claimed as before.
+- `[flow] requires` stays `>=0.3.2,<0.4`; no project has to change its pin.
+- The docs narrow the id claim: ids sort in creation order within one local day
+  and timezone, not globally. `collaboration.md` now covers cross-timezone and
+  clock-rollback codes, takeover, the roster, and the release-record filename
+  collision that happens when two clones record the same source.
+- Tests cover the paths that were only specified before: the id bump when a code
+  is already on disk, the duplicate-id report, a second process contending for
+  the per-clone lock, and atomic writes that keep LF endings.
+
+### Fixed
+
+- Test fixtures resolve their temporary directory, so the suite passes on macOS
+  where `/var` is a symlink to `/private/var`. CI runs on Linux and never saw it.
+
 ## 0.3.3 — 2026-11-26
 
 The directory slug follows the title's script instead of forcing one width on
