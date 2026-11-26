@@ -22,6 +22,9 @@ anything; an ambiguous channel history does.
 The watermark is the ancestry tip of the channel's records, not the newest
 filename. `--since` overrides it and must be an ancestor of HEAD. With no
 record, the whole history is inspected; use `--since` on a large repository.
+On `release --record`, `--since` may start earlier than the recorded tip (a
+first-release baseline) but never later; it cannot skip debt between the tip
+and HEAD.
 
 A record that references a commit missing from this clone, two records that are
 not on one history, or a `previous` that does not match the record before it is
@@ -31,12 +34,21 @@ reported as an error. The range cannot be trusted until it is fixed, so
 ## Categories
 
 1. **no work item** — no item id in the subject or body. Becomes an adhoc note
-   in the next release record.
+   in the next release record. A commit that only adds release records or
+   archives an item is **bookkeeping**, not debt; it stays visible in its own
+   category and does not need a note.
 2. **missing work item** — the subject references an id that does not exist.
-   Usually a typo or a deleted item.
+   Usually a typo or a deleted item. Archived ids are known, so history does not
+   become missing after archival.
 3. **risky path without item** — touches a configured `[reconcile] risk_paths`
    entry (migrations, auth, deploy) with no item. Needs a targeted check.
-4. **uncommitted** — a dirty tree. Resolve it or exclude it explicitly.
+4. **risky path with item** — the same path under a commit that names an item.
+   It is still reported: an unrelated id must not hide a migration.
+5. **uncommitted** — a dirty tree. Resolve it or exclude it explicitly.
+
+`[reconcile] risk_paths` colours this report. `[design] risk_paths` drives
+`release --confirm`; a path in only one list is called out by `release` so the
+split is visible. They have different jobs; keep both honest.
 
 ## Recording
 

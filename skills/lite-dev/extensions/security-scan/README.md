@@ -1,7 +1,7 @@
 # security-scan extension
 
-A bundled extension that fails the gate when a **git-tracked** file looks like a
-committed credential. It only adds:
+A bundled extension that fails the gate when a file that could be committed
+looks like a credential. It only adds:
 
 - command: `security_scan`
 - gate step: `l3 += security_scan`
@@ -24,9 +24,10 @@ Shapes, not specific values:
 | `credentialed-url` | `scheme://user:password@host` |
 | `secret-assignment` | `secret/token/password/api_key = "…"` with a long value |
 | `jwt` | three base64url segments |
-| tracked sensitive file | `.env`, `*.pem`, `*.key`, `.p12`, `.pfx`, `.keystore`, `.jks`, `.netrc` |
+| sensitive file | `.env`, `*.pem`, `*.key`, `.p12`, `.pfx`, `.keystore`, `.jks`, `.netrc` |
 
-It scans `git ls-files`, so nothing untracked and nothing inside `.git` is read;
+It scans the index plus untracked non-ignored files, so a new `.env` is caught
+before the commit that would publish it. Ignored files and `.git` are not read;
 binary files and files over 512 KiB are skipped.
 
 ## Allowlist

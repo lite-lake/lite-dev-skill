@@ -4,11 +4,16 @@
 
 | Signal | One-shot | Two-phase |
 |---|---|---|
-| Size | S / M | L |
+| Size | S; M when it fits | L |
+| Design | none for S; M/L require it when `design.required_for` says so | required |
 | Estimate | within half a day | over five person-days |
 | Surface | one file or one module | schema, permissions, new module, cross-cutting contract |
 | Batches | one | two to five |
 | Sessions | one | design session + scheduling session |
+
+M is the awkward middle: it is still one session, but if the profile lists M in
+`design.required_for`, write the design first and keep the batches small. Size
+does not override a `risk_paths` change; that needs a design at any size.
 
 When unsure, prefer one-shot for reversible changes and two-phase when a wrong
 contract would be expensive to undo.
@@ -22,8 +27,10 @@ contract would be expensive to undo.
    - two or three trade-offs: options, cost, decision;
    - questions only the human can answer;
    - the explicit question: "shall I write this into design.md?"
-3. Only after a clear yes, write `design.md` and copy the same summary into it.
-4. The design must list **every** batch up front. No "this round", no "stage 1".
+3. Only after a clear yes, run `flow.py design <ID>` (or copy
+   `templates/design.md`) and fill it; the scaffold is not a plan.
+4. The design must list **every** batch up front, `B1..Bn` in order, with no
+   forward dependency. No "this round", no "stage 1".
 5. Do not write production code or create a feature branch. Temporary experiments are not committed.
 6. Run `flow.py design-ready <ID>`; it refuses AC gaps, batch gaps, missing
    rollback, placeholders, and an unconfirmed plan.
@@ -39,8 +46,10 @@ The main session does not write code. For each batch:
 
 1. **implement** — fresh context, only the item id, batch id, design path, repo
    path, the batch's AC subset, and the gate command.
-2. **verify** — fresh context, black-box against the batch's AC. At most two rounds.
-3. **commit** — only after PASS; the gate runs in full, one commit per repo per batch.
+2. **verify** — fresh context, black-box against the batch's AC. At most two
+   rounds. Append the batch's evidence to the item's cumulative
+   `test-report.md`; never overwrite earlier rows.
+3. **commit** — only after PASS; the full gate runs, one commit per repo per batch.
 4. **bookkeeping** — update `## Implementation`, then start the next batch.
 
 Never stop between batches to ask "continue?". Batch completion is not a stop

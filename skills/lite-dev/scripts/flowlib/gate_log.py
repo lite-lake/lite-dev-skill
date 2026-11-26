@@ -79,6 +79,24 @@ def last_pass(profile: Profile, level: str) -> dict | None:
     return latest
 
 
+def last_pass_for(profile: Profile, level: str, item: str) -> dict | None:
+    """The item's own PASS, not a project-wide run it happened to share.
+
+    `done` uses this: closing an item is a claim that its gate passed, and a
+    project-wide run does not name the item. The ledger is per clone, so a
+    teammate must run the gate on their clone before closing.
+    """
+    latest = None
+    for entry in entries(profile):
+        if entry.get("level") != level or not entry.get("ok"):
+            continue
+        if str(entry.get("item", "")) != item:
+            continue
+        if latest is None or str(entry.get("date", "")) >= str(latest.get("date", "")):
+            latest = entry
+    return latest
+
+
 def _age(day: str) -> int | None:
     try:
         return (date.today() - date.fromisoformat(day)).days

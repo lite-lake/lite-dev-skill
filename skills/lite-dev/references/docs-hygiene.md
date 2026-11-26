@@ -17,10 +17,13 @@ facts. `check` mechanises the part of it that can be decided from the files:
 | an exemption has a reason and has not expired | error | a silence nobody reviewed |
 | an exemption suppresses at least one issue | warning | a stale exception |
 | no active document links into `_archive/` | warning | history read as current |
-| a designed item has a passing test report | error at `done` | an AC tick standing in for evidence |
+| every item has a passing test report | error at `done` | an AC tick standing in for evidence |
+| every archived item has one index row | warning | the archive index drifting from the tree |
 
-The last row is not a document rule: it is invariant 5, enforced where the item
-closes. `check` reports it as a warning while the item is still open.
+The test-report row is not a document rule: it is invariant 5, enforced where
+the item closes. `check` reports it as a warning while the item is still open.
+The archive-index row is a document rule: the index is the entry point for the
+record store, so it must not drift from the tree.
 
 ## What counts as an entry document
 
@@ -44,7 +47,10 @@ that already had a README, which left a whole unreferenced subtree invisible.
 
 Record stores are excluded: item directories under `work_dir` are listed by
 `status`, release records are ordered by the commit graph. Demanding index links
-for them would be noise, not reachability.
+for them would be noise, not reachability. This applies even if you add a
+`docs/releases/README.md`: its records are not required to be linked from it.
+The archive index is the exception: it is the entry point for archived items, so
+`check` warns when an archived item has no row or a row has no item.
 
 A document that cannot be described as one row in a route table probably should
 not exist. Write the row first; if it does not make sense, the page has no
@@ -78,6 +84,8 @@ mechanics:
 
 - `Status` is one of `proposed`, `accepted`, `rejected`, `superseded`,
   `deprecated`;
+- an unused pointer is written as `none`, not left empty; the shipped template
+  does this and passes its own checker;
 - a `superseded` decision has `Superseded by:` pointing at a decision in the
   same directory;
 - a decision that names a successor has the matching status;

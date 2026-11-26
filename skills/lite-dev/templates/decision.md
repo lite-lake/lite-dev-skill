@@ -7,8 +7,8 @@
 - Status: proposed
 - Date:
 - Owner:
-- Supersedes:
-- Superseded by:
+- Supersedes: none
+- Superseded by: none
 
 > `Status` is one of `proposed`, `accepted`, `rejected`, `superseded`,
 > `deprecated`. `Superseded by:` is required when the status is `superseded`,

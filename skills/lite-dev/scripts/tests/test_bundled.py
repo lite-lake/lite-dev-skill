@@ -130,7 +130,14 @@ class BundledExtensionTest(unittest.TestCase):
         self.git("add", "-A")
         result = self.run_scan()
         self.assertEqual(result.returncode, 1)
-        self.assertIn("sensitive file is tracked", result.stdout)
+        self.assertIn("sensitive file would be committed", result.stdout)
+
+    def test_security_scan_flags_an_untracked_sensitive_file(self) -> None:
+        self.git("init", "-q")
+        self.write(".env", "OK=1\n")
+        result = self.run_scan()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("sensitive file would be committed", result.stdout)
 
     def run_deploy(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(

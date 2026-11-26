@@ -9,5 +9,6 @@ anything, read `<path-to-lite-dev-skill>/skills/lite-dev/SKILL.md`.
 - Ids are generated; an owner is required. Take over an item with `flow.py claim <ID>`.
 - The gate is the project's own commands. Do not invent a different one.
 
-Sizes S and M run as one-shot. Size L requires `design.md` and a human-confirmed
-plan before any code.
+Size S is one-shot. Sizes M and L require `design.md` and a human-confirmed plan
+before code; L also runs as two-phase. The authority is `[design] required_for`
+in the profile.

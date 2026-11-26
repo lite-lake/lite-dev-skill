@@ -35,6 +35,7 @@ class AcceptanceTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = (Path(self._tmp.name) / "project").resolve()
         shutil.copytree(EXAMPLE, self.root)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -142,7 +143,7 @@ batch: B2
         check = self.run_flow("check")
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
 
-        gate = self.run_flow("gate", "--level", "l1")
+        gate = self.run_flow("gate", "--level", "l3", "--work", small_id)
         self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
         self.assertIn("PASS", gate.stdout)
 
@@ -151,6 +152,7 @@ batch: B2
         self.assertIn("unchecked AC", early.stdout)
 
         self.tick_all_ac(small)
+        self.write_report(small)
         done = self.run_flow("done", small_id)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
@@ -215,6 +217,7 @@ batch: B2
         )
         other = (Path(self._tmp.name) / "other").resolve()
         shutil.copytree(EXAMPLE, other)
+        subprocess.run(["git", "init", "-q"], cwd=other, check=True)
         second_id = self.created_id(
             self.run_flow(
                 "new", "--title", "Same Title", "--type", "REQ", "--size", "S", cwd=other
@@ -235,7 +238,10 @@ batch: B2
             directory = self.item_dir(created, root=root)
             self.clarify_and_fill_ac(directory, "one", "two")
             self.tick_all_ac(directory)
-            done = self.run_flow("done", created)
+            self.write_report(directory)
+            gate = self.run_flow("gate", "--level", "l3", "--work", created, cwd=root)
+            self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
+            done = self.run_flow("done", created, cwd=root)
             self.assertEqual(done.returncode, 0, done.stdout)
             self.assertNotIn("ambiguous", done.stdout)
 

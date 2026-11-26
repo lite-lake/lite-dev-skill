@@ -17,6 +17,19 @@ DESIGN_SECTIONS = (
     "Verification",
     "Rollback",
 )
+# Headings are a parsing contract: translate the prose, not the heading. These
+# aliases exist only so the error can name the exact replacement instead of
+# reporting a bare "missing '## Handoff'".
+DESIGN_SECTION_ALIASES = {
+    "Handoff": ("交接摘要",),
+    "Diagram": ("方案图",),
+    "Confirmation": ("方案确认",),
+    "Approach": ("实现方案",),
+    "Batches": ("实施批次",),
+    "Impact": ("影响",),
+    "Verification": ("怎么验",),
+    "Rollback": ("怎么回滚",),
+}
 HANDOFF_LABELS = (
     ("Goal", "目标"),
     ("Scope", "改动范围"),
@@ -46,6 +59,11 @@ def design_errors(item: artifacts.Item, profile: Profile) -> list[str]:
     errors: list[str] = []
     if item.design_path is None:
         return [f"design.md is missing for {item.id}"]
+    design_item = (item.design_meta.get("item") or "").strip()
+    if design_item != item.id:
+        errors.append(
+            f"design.md frontmatter 'item' must be {item.id}, not {design_item or '(empty)'}"
+        )
     if item.clarify_state not in artifacts.CLARIFIED:
         errors.append(
             "requirement is not clarified; set '- Status: clarified' in ## Clarify before designing"
@@ -53,7 +71,18 @@ def design_errors(item: artifacts.Item, profile: Profile) -> list[str]:
 
     found = artifacts.sections(item.design_body)
     for name in DESIGN_SECTIONS:
-        if name not in found:
+        if name in found:
+            continue
+        alias = next(
+            (candidate for candidate in DESIGN_SECTION_ALIASES.get(name, ()) if candidate in found),
+            "",
+        )
+        if alias:
+            errors.append(
+                f"design.md uses '## {alias}'; the parsed heading must stay '## {name}'. "
+                "Translate the prose, not the heading."
+            )
+        else:
             errors.append(f"design.md is missing '## {name}'")
 
     errors.extend(_handoff_errors(item))
@@ -115,6 +144,7 @@ def _batch_errors(item: artifacts.Item, batches: list[dict[str, str]]) -> list[s
 
     ids: list[str] = []
     covered: set[str] = set()
+    rows_by_id: dict[str, dict[str, str]] = {}
     for row in batches:
         batch_id = artifacts.row_value(row, "Batch", "批次").strip()
         if not BATCH_ID_RE.match(batch_id):
@@ -122,21 +152,39 @@ def _batch_errors(item: artifacts.Item, batches: list[dict[str, str]]) -> list[s
             continue
         if batch_id in ids:
             errors.append(f"duplicate batch id {batch_id}")
+            continue
         ids.append(batch_id)
+        rows_by_id[batch_id] = row
         covered.update(AC_ID_RE.findall(artifacts.row_value(row, "AC", "覆盖 AC", "覆盖AC")))
+
+    expected = [f"B{index}" for index in range(1, len(ids) + 1)]
+    if ids and ids != expected:
+        errors.append(
+            "batches must be listed as B1..Bn in order; got "
+            + ", ".join(ids)
+            + f" (expected {', '.join(expected)})"
+        )
 
     for ac_id in artifacts.ac_ids(item):
         if ac_id not in covered:
             errors.append(f"{ac_id} is not covered by any batch")
 
-    for row in batches:
-        depends = artifacts.row_value(row, "Depends", "依赖").strip()
+    positions = {batch_id: index for index, batch_id in enumerate(ids)}
+    for batch_id in ids:
+        depends = artifacts.row_value(rows_by_id[batch_id], "Depends", "依赖").strip()
         for dependency in re.split(r"[,，;；\s]+", depends):
             if not dependency or dependency in {"-", "—"}:
                 continue
+            if dependency == batch_id:
+                errors.append(f"batch {batch_id} depends on itself")
+                continue
             if dependency not in ids:
+                errors.append(f"batch {batch_id} depends on unknown {dependency}")
+                continue
+            if positions[dependency] >= positions[batch_id]:
                 errors.append(
-                    f"batch {artifacts.row_value(row, 'Batch', '批次')} depends on unknown {dependency}"
+                    f"batch {batch_id} depends on {dependency}, which is not an earlier batch; "
+                    "dependencies must point backwards so the order is executable"
                 )
     return errors
 
@@ -219,15 +267,37 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     known_batches = {
         artifacts.row_value(row, "Batch", "批次").strip() for row in item.batches
     }
+    progress_batches = {
+        artifacts.row_value(row, "Batch", "批次").strip()
+        for row in item.progress
+        if artifacts.row_value(row, "Batch", "批次").strip()
+    }
+    started = any(
+        artifacts.row_value(row, "Status", "状态").strip().lower()
+        in {"doing", "done", "blocked", "进行中", "完成", "阻塞"}
+        for row in item.progress
+    )
+    if item.design_path is not None and started:
+        for batch_id in sorted(known_batches):
+            if batch_id and batch_id not in progress_batches:
+                warnings.append(
+                    f"{label}: design defines {batch_id} but ## Implementation has no "
+                    "row; add it so a resume can tell 'not started' from 'lost'"
+                )
     for row in item.progress:
         batch_id = artifacts.row_value(row, "Batch", "批次").strip()
         state = artifacts.row_value(row, "Status", "状态").strip().lower()
-        if batch_id and batch_id not in {"-", "—"} and batch_id not in known_batches:
+        if (
+            item.design_path is not None
+            and batch_id
+            and batch_id not in {"-", "—"}
+            and batch_id not in known_batches
+        ):
             warnings.append(f"{label}: progress mentions {batch_id} which design.md does not define")
         if state and state not in {"pending", "doing", "done", "blocked", "待开始", "进行中", "完成", "阻塞"}:
             warnings.append(f"{label}: progress state {state!r} is not a known state")
 
-    if (item.meta.get("closed") or "").strip() and item.ac_done != item.ac_total:
+    if item.status == "done" and item.ac_done != item.ac_total:
         warnings.append(
             f"{label}: closed but AC is {item.ac_done}/{item.ac_total}"
         )
@@ -243,11 +313,14 @@ def _row_value_loose(row: dict[str, str], needles: tuple[str, ...]) -> str:
 
 
 def _empty_evidence(value: str) -> bool:
-    return (
-        not value
-        or bool(PLACEHOLDER_WORDS.search(value))
-        or bool(artifacts.PLACEHOLDER_RE.search(value))
-    )
+    """A cell is empty when it has no content or only a TODO-style placeholder.
+
+    Angle brackets are not placeholders by themselves: real commands contain
+    `<skill>`, test output contains `<nil>`/`<br>`, and rejecting those turned
+    valid evidence into a false negative. The template's command cell is empty,
+    so it is still caught.
+    """
+    return not value or bool(PLACEHOLDER_WORDS.search(value))
 
 
 def evidence_problems(
@@ -294,7 +367,7 @@ def evidence_problems(
 
     known = set(artifacts.ac_ids(item))
     covered: set[str] = set()
-    for row in artifacts.parse_table(body, "Evidence", "证据"):
+    for row in artifacts.parse_tables(body, "Evidence", "证据"):
         ac_id = artifacts.row_value(row, "AC", "验收项").strip()
         if not ac_id or ac_id in {"AC", "-", "—"}:
             continue
@@ -353,6 +426,13 @@ def owner_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
 
 def _path_matches(path: str, prefixes: list[str]) -> bool:
     return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
+
+
+def paths_matching(paths: list[str], prefixes: list[str]) -> list[str]:
+    """Paths under a configured prefix set, deduplicated and sorted."""
+    if not prefixes:
+        return []
+    return sorted({path for path in paths if _path_matches(path, prefixes)})
 
 
 def risk_paths_touched(profile: Profile, paths: list[str]) -> list[str]:
@@ -521,13 +601,17 @@ def check_project(
     for item in items:
         if item.id:
             by_id.setdefault(item.id, []).append(item.directory.name)
+    duplicates = {
+        item_id: names for item_id, names in by_id.items() if len(names) > 1
+    }
+    reported_duplicates: set[str] = set()
 
     scoped = [artifacts.find_item(profile, work)] if work else items
     for item in scoped:
-        others = [name for name in by_id.get(item.id, []) if name != item.directory.name]
-        if others:
+        if item.id in duplicates and item.id not in reported_duplicates:
+            reported_duplicates.add(item.id)
             errors.append(
-                f"duplicate item id {item.id} in {item.directory.name} and {', '.join(others)}"
+                f"duplicate item id {item.id} in {', '.join(duplicates[item.id])}"
             )
 
         errors.extend(item_errors(item, profile))
@@ -536,11 +620,7 @@ def check_project(
         evidence_errors, evidence_warnings = evidence_problems(item)
         errors.extend(evidence_errors)
         warnings.extend(evidence_warnings)
-        if (
-            item.status == "done"
-            and item.design_path is not None
-            and not (item.directory / "test-report.md").is_file()
-        ):
+        if item.status == "done" and not (item.directory / "test-report.md").is_file():
             warnings.append(
                 f"{item.directory.name}: closed without a test-report; "
                 "the AC tick is a claim, not evidence"

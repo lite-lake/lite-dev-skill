@@ -5,6 +5,9 @@ status: draft
 
 # <ID> design
 
+> Section headings are a parsing contract: keep them English and translate the
+> prose. Batches are `B1..Bn` in order; a dependency must point backwards.
+
 ## Handoff
 
 > Must be readable without the rest of this file. A fresh session starts here.

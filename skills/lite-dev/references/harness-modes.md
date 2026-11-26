@@ -14,7 +14,8 @@ verifies. How you get them depends on the harness.
 
 ## Mode B: single context only
 
-This is a weaker mode. Say so in `implementation.md`; do not pretend the
+This is a weaker mode. Say so in `implementation.md`; a one-shot item with no
+`implementation.md` declares it in `## Notes` of `item.md`. Do not pretend the
 independence is real.
 
 - Between roles, write a handoff file and re-read only the artifacts:

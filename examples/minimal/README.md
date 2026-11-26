@@ -31,13 +31,16 @@ python3 $SKILL/scripts/flow.py handoff <ID>      # the prompt for the next sessi
 
 1. `new` with size S. Open `item.md`, answer or dismiss the clarifying questions,
    set `- Status: clarified`.
-2. For S/M, no design is required: implement, run `check`, run `gate --level l3`.
-3. Tick the AC boxes you can prove, then `flow.py done <ID>`.
+2. Implement and add a `test-report.md` with one evidence row per AC, run
+   `check`, then `gate --level l3 --work <ID>`.
+3. Tick the AC boxes you can prove, then `flow.py done <ID>` (it requires the
+   report and the recorded l3 PASS).
 4. `flow.py archive <ID>` when the item is history; `status` then counts it as
    archived instead of listing it.
 
-For an L item, copy `design.md` from the skill's templates, speak the plan to a
-human, record `Confirmed: yes`, run `design-ready`, then implement batch by batch.
+For an M or L item, run `flow.py design <ID>` (or copy the skill's template),
+speak the plan to a human, record `Confirmed: yes`, run `design-ready`, then
+implement. L designs normally have several batches; M is still one session.
 
 ## Notes
 

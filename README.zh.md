@@ -20,12 +20,12 @@
 需求
   -> 澄清（最多 5 问，一次问完）
   -> 工作项（item.md，AC）
-  -> 设计（仅在改动大或风险高时）
-  -> 批次（B1..Bn，覆盖全部 AC）
-  -> 逐批 implement -> verify -> commit
+  -> 设计（由 profile.required_for 或 risk_paths 决定；M 默认包含）
+  -> 批次（B1..Bn，有序，覆盖全部 AC）
+  -> 逐批 implement -> verify（追加证据）-> commit
   -> 门禁（跑项目自己的命令，不是我们的）
   -> 发布记录（可选通道）
-  -> done（AC 勾选、证据齐备）
+  -> done（AC 勾选、证据、门禁 PASS、身份）
 ```
 
 有三点让它不同于普通清单：
@@ -72,7 +72,9 @@
    `flow.py whoami` 显示这台机器上实际生效的身份和来源。
 
 4. **对 Agent 说。**「在这个仓库接入 lite-dev」，或直接说「实现 X」。skill 会在
-   实现、修复、设计、发布类请求上触发。
+   实现、修复、设计、发布类请求上触发。需要设计时用 `flow.py design <ID>` 生成脚手架。
+   每个条目收尾都需要一份累计的 `test-report.md`、一条记录在案的 full level 门禁
+   PASS，以及身份。
 
 5. **随时检查。**
 
@@ -91,9 +93,9 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
   references/               不变量 + 按情境加载的细则
   templates/                item / design / test-report / implementation / release / retro / decision
   extensions/               随 skill 分发的扩展（go-service、security-scan、deploy-lane）
-  scripts/flow.py           new / claim / whoami / status / check / design-ready /
-                            gate / done / handoff / archive / unarchive / release /
-                            reconcile / extensions
+  scripts/flow.py           new / claim / whoami / status / check / design /
+                            design-ready / gate / done / drop / handoff / archive /
+                            unarchive / release / reconcile / extensions
   scripts/flowlib/          profile、身份、产物解析、检查、文档卫生、门禁账本、
                             交接提示词、归档、命令执行、原子写入与写者锁
   scripts/tests/            单元测试 + 端到端验收
@@ -108,14 +110,15 @@ examples/minimal/           可直接跑的单仓库示例项目
 | frontmatter / AC / 批次解析 | 设计叙述与图示 |
 | 状态推导 | 批次拆分 |
 | 必填字段、链接、AC↔批次↔验证 | 代码与测试 |
-| 证据完整性（每个 AC 一行命令与输出、结论） | 证据是否充分 |
-| 设计门禁（确认、回滚、缺口） | 故障诊断 |
-| 执行 profile 命令、退出码 | 黑盒验收判断 |
-| 按提交图排序的发布链 | 部署判断 |
+| 所有条目的证据完整性（每个 AC 一行命令与输出、结论） | 证据是否充分 |
+| 设计门禁（确认、回滚、缺口、有序批次图） | 故障诊断 |
+| 执行 profile 命令、退出码、记录在案的 full level PASS | 黑盒验收判断 |
+| 按提交图排序的发布链；区分记账提交与欠账 | 部署判断 |
 | 从产物拼出交接提示词 | 下一步该做什么的判断 |
-| 文档可达性、索引图连通、入口文档的事实 | 文字是否属实 |
+| 文档可达性、索引图连通、入口文档的事实、归档索引 | 文字是否属实 |
 | 决策链、豁免到期、条目停滞（git 推导） | 哪些东西该清理或重审 |
 | 风险路径的设计门、本克隆的门禁新鲜度 | 改动实际有多险 |
+| 身份、claim/takeover、归档只读生命周期 | 谁有权改什么 |
 
 线左边一律交给脚本，因为 Agent 自己汇报这类事总是失真；
 线右边一律交给文字，因为脚本会判断错。
@@ -132,22 +135,25 @@ examples/minimal/           可直接跑的单仓库示例项目
 ```bash
 flow.py release --channel staging      # 只出计划：门禁、提交、欠账、记录路径
 flow.py release --channel staging --record --rollback "..." --note "..."
-flow.py release --channel staging --record --rollback "..." --confirm "..."
+flow.py release --channel staging --record --rollback "..." --confirm "..." --confirmed-by "..."
 flow.py reconcile                      # 建议性欠账报告，永不阻断
 flow.py extensions                     # 每个扩展贡献了什么
 ```
 
 `--record` 会自己跑门禁，之前跑过不算证据。它会拒绝脏工作树、非 `release.mainline`
-分支、空的回滚说明、不是已记录 tip 后代的 source，以及没有写进 `--note` 的无工作项
-提交。profile 打开 `[release] confirm_risk_paths` 后，触及 `[design] risk_paths` 的
-发布范围还需要 `--confirm`，记录里会留下谁批准的。
+分支、落后于上游的克隆、空的回滚说明、不是已记录 tip 后代的 source，以及没有写进
+`--note` 的无工作项提交。只新增发布记录或归档条目的提交是记账提交，不算欠账。profile
+打开 `[release] confirm_risk_paths` 后，触及 `[design] risk_paths` 的发布范围还需要
+`--confirm`；当批准人不是记录人时用 `--confirmed-by` 点名。记录里会留下人的原话，
+而不只是回滚方案。
 
 扩展是声明式、只加不减的：命令、门禁步骤、必需文档、风险路径。加载器拒绝命令冲突、
 未知键和与 `requires` 不兼容的版本区间。随 skill 分发的扩展可以自带脚本，并在命令里
 用 `{skill}` 引用，加载器会把它展开为已安装的 skill 目录。
 
-随附三个：`go-service`（build/vet/test 与 Go 风险路径）、`security-scan`（追踪文件里
-有凭据就让门禁失败）、`deploy-lane`（校验部署 manifest）。
+随附三个：`go-service`（build/vet/test 与 Go 风险路径；构建输出写到临时目录）、
+`security-scan`（索引里或未跟踪的非忽略文件里有凭据就让门禁失败）、`deploy-lane`
+（校验部署 manifest）。
 
 ## 团队与多台机器
 
@@ -160,11 +166,13 @@ flow.py extensions                     # 每个扩展贡献了什么
   工具从不猜。
 - **归属必须显式。** `owner` 必填，来源是 `--owner`、`$LITE_DEV_OWNER` 或
   `git config lite-dev.owner`，绝不取 `user.name`。`whoami` 显示生效值和来源；
-  `claim` 接管条目，`status --mine` 按人过滤。接管别人未关闭的条目需要 `--takeover`，
-  `done` 会写入 `closed_by`，可选的 `[project] owners` 名单让 `check` 报出名单之外的
-  拼写。
-- **发布按提交图排序。** `--record` 只在主线执行；落后的克隆会被拒绝而不是记下更旧
-  的 source；读坏或分叉的记录会中止发布。
+  `claim` 接管条目，`status --mine` 按人过滤。接管别人未关闭的条目需要
+  `--takeover --reason "..."`；已关闭条目不能 claim，归档条目在 unarchive 前只读。
+  `done` 需要身份并写入 `closed_by`，可选的 `[project] owners` 名单让 `check` 报出
+  非规范拼写。
+- **发布按提交图排序。** `--record` 只在主线执行；落后于上游的克隆会被拒绝；未 fetch
+  的克隆本地无法识别，必须先 pull。读坏或分叉的记录会中止发布；来自陈旧克隆的坏记录
+  用 revert 提交修复，绝不直接编辑记录。
 
 `gate --work <ID>` 只校验该条目和必需文档，所以同事的半成品不会阻塞你的批次；裸
 `check` 和发布仍然校验全量。`status` 显示分支、HEAD 和相对上次 fetch 的距离
@@ -176,11 +184,12 @@ flow.py extensions                     # 每个扩展贡献了什么
 ## 状态
 
 当前版本已实现 `new`、`claim`、`whoami`、`status`（含 `--stale`）、`check`、
-`design-ready`、`gate`、`done`、`handoff`、`archive`、`unarchive`、`release`、
-`reconcile`、`extensions`，模板（含 `decision.md`）、不变量文档、文档卫生检查、
-索引图连通、决策链、带到期日的豁免台账、证据完整性校验（`done` 拒绝设计项缺少通过
-的测试报告）、风险路径设计门、按克隆记录的门禁账本、三个随附扩展，以及可运行的
-单仓库示例。计划中：多仓库 workspace profile。
+`design`、`design-ready`、`gate`、`done`、`drop`、`handoff`、`archive`、
+`unarchive`、`release`、`reconcile`、`extensions`，模板（含 `decision.md`）、
+不变量文档、文档卫生检查、索引图连通、决策链、带到期日的豁免台账、累计证据校验
+（`done` 拒绝任何缺少通过报告、缺少记录在案的 full level PASS、或缺少身份的条目）、
+有序批次图、风险路径设计门、按克隆记录的门禁账本、发布记账与欠账分离、三个随附扩展，
+以及可运行的单仓库示例。计划中：多仓库 workspace profile。
 
 版本与破坏性变更见 `CHANGELOG.md`（[中文](CHANGELOG.zh.md)）。
 

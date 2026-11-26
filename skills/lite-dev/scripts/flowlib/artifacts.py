@@ -105,6 +105,22 @@ def section(body: str, *names: str) -> str | None:
     return None
 
 
+def all_sections(body: str, *names: str) -> list[str]:
+    """Every section whose heading is one of `names`, in document order.
+
+    A cumulative `test-report.md` appends one `## Evidence` block per batch.
+    `section` keeps only the first one, so evidence parsing needs this view.
+    """
+    matches = list(HEADING_RE.finditer(body))
+    found: list[str] = []
+    for index, match in enumerate(matches):
+        if match.group(1).strip() not in names:
+            continue
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        found.append(body[match.end() : end].strip())
+    return found
+
+
 def parse_ac(body: str) -> list[dict]:
     text = section(body, "AC") or ""
     return [
@@ -113,10 +129,7 @@ def parse_ac(body: str) -> list[dict]:
     ]
 
 
-def parse_table(body: str, *headings: str) -> list[dict[str, str]]:
-    text = section(body, *headings)
-    if not text:
-        return []
+def _parse_table_text(text: str) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     header: list[str] | None = None
     for line in text.splitlines():
@@ -130,6 +143,19 @@ def parse_table(body: str, *headings: str) -> list[dict[str, str]]:
         if cells and all(re.fullmatch(r":?-{2,}:?", cell) for cell in cells if cell):
             continue
         rows.append(dict(zip(header, cells)))
+    return rows
+
+
+def parse_table(body: str, *headings: str) -> list[dict[str, str]]:
+    text = section(body, *headings)
+    return _parse_table_text(text) if text else []
+
+
+def parse_tables(body: str, *headings: str) -> list[dict[str, str]]:
+    """Rows from every matching table, so appended evidence blocks accumulate."""
+    rows: list[dict[str, str]] = []
+    for text in all_sections(body, *headings):
+        rows.extend(_parse_table_text(text))
     return rows
 
 
@@ -261,6 +287,11 @@ def all_items(profile: Profile) -> list[Item]:
 
 def archived_items(profile: Profile) -> list[Item]:
     return _items_under(profile.work_path / ARCHIVE_DIR)
+
+
+def is_archived(item: Item) -> bool:
+    """History is read-only through the flow; unarchive it to change it."""
+    return ARCHIVE_DIR in item.directory.parts
 
 
 def find_item(profile: Profile, item_id: str) -> Item:

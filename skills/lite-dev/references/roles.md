@@ -38,9 +38,11 @@ Input: item id, batch id, AC subset, how to run the product.
 
 - Verify black-box against the AC. Do not read the implementation rationale first.
 - Choose checks that can falsify the AC, not checks that reproduce the implementation.
-- Write `test-report.md`: verdict, evidence per AC, environment, what was not covered.
-  One row per AC with the command you ran and what it printed; `done` refuses a
-  designed item without it, and an empty cell is not evidence.
+- Append to the item's single cumulative `test-report.md`: verdict, evidence per
+  AC, environment, what was not covered. One row per AC with the command you ran
+  and what it printed; never overwrite an earlier batch's rows. A later batch may
+  append another `## Evidence` block; `done` reads every block. `done` refuses
+  any item without the report, and an empty cell is not evidence.
 - Do not commit. Report a defect; the commit role owns the commit.
 - Fix only defects inside the batch; at most two rounds, then stop and ask.
 

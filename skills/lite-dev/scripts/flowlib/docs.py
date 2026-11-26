@@ -188,6 +188,8 @@ def index_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
     """
     warnings: list[str] = []
     for directory in _index_dirs(profile):
+        if _excluded_from_index(profile, directory):
+            continue
         readme = directory / "README.md"
         if not readme.is_file():
             continue
@@ -331,6 +333,49 @@ def artifact_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
     return warnings
 
 
+def archive_index_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
+    """The archive index is the record store's entry point; keep it honest."""
+    base = profile.work_path / artifacts.ARCHIVE_DIR
+    items = artifacts.archived_items(profile)
+    if not items:
+        return []
+    index = base / "README.md"
+    if not index.is_file():
+        return [
+            f"{index.relative_to(profile.root)}: archived items exist but the index is missing; "
+            "run flow.py archive/unarchive to rebuild it"
+        ]
+    text = artifacts.read_text(index)
+    if exempt.allows("artifact", index):
+        return []
+    linked: set[str] = set()
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if not cells:
+            continue
+        match = re.search(r"\[([^\]]+)\]\(([^)]+)\)", cells[0])
+        if match:
+            linked.add(match.group(1))
+    warnings: list[str] = []
+    for item in items:
+        if item.id not in text:
+            warnings.append(
+                f"{item.directory.name}: archived item has no row in "
+                f"{index.relative_to(profile.root)}; restore it with unarchive/archive"
+            )
+    known = {item.id for item in items}
+    for item_id in sorted(linked - known):
+        if exempt.allows("artifact", index):
+            continue
+        warnings.append(
+            f"{index.relative_to(profile.root)}: row for {item_id} has no archived item; "
+            "restore the item or remove the row"
+        )
+    return warnings
+
+
 def heading_errors(profile: Profile, exempt: _Exemptions) -> list[str]:
     """Append-only records must not repeat a heading: two entries would collide."""
     errors: list[str] = []
@@ -414,8 +459,12 @@ def archive_link_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
 
 def _decision_field(text: str, *names: str) -> str:
     for name in names:
+        # `[ \t]` matters: `\s` crossed the newline and made an empty field
+        # swallow the next bullet, so the shipped decision template failed its
+        # own checker.
         match = re.search(
-            rf"^\s*[-*]\s*(?:\*\*)?{re.escape(name)}(?:\*\*)?\s*[:：]\s*(.+?)\s*$",
+            rf"^[ \t]*[-*][ \t]*(?:\*\*)?{re.escape(name)}(?:\*\*)?[ \t]*[:：][ \t]*"
+            r"(.+?)[ \t]*$",
             text,
             re.M | re.I,
         )
@@ -529,6 +578,7 @@ def problems(profile: Profile) -> tuple[list[str], list[str]]:
     warnings.extend(index_warnings(profile, exempt))
     warnings.extend(index_graph_warnings(profile, exempt))
     warnings.extend(artifact_warnings(profile, exempt))
+    warnings.extend(archive_index_warnings(profile, exempt))
     warnings.extend(archive_link_warnings(profile, exempt))
     if profile.docs_zero_fact:
         warnings.extend(zero_fact_warnings(profile, exempt))

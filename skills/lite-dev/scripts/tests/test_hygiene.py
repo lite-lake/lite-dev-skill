@@ -351,6 +351,58 @@ class HygieneTest(unittest.TestCase):
         index = (self.root / "docs/work/_archive/README.md").read_text(encoding="utf-8")
         self.assertNotIn(ITEM_ID, index)
 
+    def test_decision_template_passes_its_own_checker(self) -> None:
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.format(extra_docs='decisions = "docs/adr"\n', extra_root=""),
+        )
+        self.write("docs/adr/README.md", "# decisions\n\n- [D1](D1.md)\n")
+        template = (
+            Path(__file__).resolve().parents[1].parent / "templates/decision.md"
+        ).read_text(encoding="utf-8")
+        self.write("docs/adr/D1.md", template)
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("Supersedes", output)
+
+    def test_release_records_are_not_demanded_in_the_release_index(self) -> None:
+        self.write("docs/releases/README.md", "# releases\n")
+        self.write("docs/releases/staging-1.md", "# a release\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("not linked from docs/releases/README.md", output)
+
+    def test_archive_force_needs_a_reason(self) -> None:
+        code, output = self.run_flow("archive", ITEM_ID, "--force")
+        self.assertEqual(code, 2)
+        self.assertIn("--force needs --reason", output)
+        self.assertTrue(self.item_dir.is_dir())
+
+    def test_archive_index_drift_is_reported(self) -> None:
+        self.write_item(closed="2026-11-26")
+        self.assertEqual(
+            self.run_flow("archive", ITEM_ID, "--reason", "shipped")[0], 0
+        )
+        index = self.root / "docs/work/_archive/README.md"
+        index.write_text(
+            "\n".join(
+                line for line in index.read_text(encoding="utf-8").splitlines()
+                if ITEM_ID not in line
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("has no row", output)
+
+    def test_archived_items_are_not_mutable(self) -> None:
+        self.write_item(closed="2026-11-26")
+        self.assertEqual(self.run_flow("archive", ITEM_ID, "--reason", "shipped")[0], 0)
+        code, output = self.run_flow("claim", ITEM_ID, "--owner", "bob")
+        self.assertEqual(code, 2)
+        self.assertIn("archived", output)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

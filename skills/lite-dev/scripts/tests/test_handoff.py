@@ -180,6 +180,99 @@ class HandoffTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("B1, B2", output)
 
+    def test_blocked_batch_is_surfaced_and_not_dispatched(self) -> None:
+        path = self.directory / "item.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "| B2 | pending | — | — |",
+                "| B2 | blocked | — | waiting on contract |",
+            ),
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("B2 blocked", output)
+        self.assertIn("BLOCKED", output)
+        code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B2")
+        self.assertEqual(code, 2)
+        self.assertIn("blocked", output)
+
+    def test_draft_design_is_not_announced_as_confirmed(self) -> None:
+        path = self.directory / "design.md"
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("status: ready", "status: draft").replace(
+            "- Confirmed: yes", "- Confirmed: no"
+        )
+        path.write_text(text, encoding="utf-8")
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("not ready or not confirmed", output)
+        self.assertNotIn("plan is confirmed", output)
+
+    def test_batch_with_an_unfinished_dependency_is_refused(self) -> None:
+        path = self.directory / "item.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "| B1 | done | abc1234 | — |", "| B1 | pending | — | — |"
+            ),
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B2")
+        self.assertEqual(code, 2)
+        self.assertIn("not done", output)
+        self.assertIn("B1", output)
+
+    def test_done_batch_cannot_be_dispatched_again(self) -> None:
+        code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B1")
+        self.assertEqual(code, 2)
+        self.assertIn("already done", output)
+        self.assertIn("B2", output)
+
+    def test_design_without_batches_says_so(self) -> None:
+        path = self.directory / "design.md"
+        text = path.read_text(encoding="utf-8")
+        start = text.index("## Batches")
+        end = text.index("## Impact")
+        path.write_text(
+            text[:start] + "## Batches\n\nNone.\n\n" + text[end:], encoding="utf-8"
+        )
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("has no ## Batches table", output)
+        self.assertNotIn("no design.md yet", output)
+
+    def test_commit_gate_is_named_separately(self) -> None:
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("Commit gate:", output)
+        self.assertIn("--level l3", output)
+
+    def test_ready_but_invalid_design_is_not_confirmed(self) -> None:
+        path = self.directory / "design.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("## Handoff", "## 交接摘要"),
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("not ready or not confirmed", output)
+        self.assertNotIn("plan is confirmed", output)
+        code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B2")
+        self.assertEqual(code, 2)
+        self.assertIn("marked ready but invalid", output)
+
+    def test_missing_progress_row_is_surfaced(self) -> None:
+        path = self.directory / "item.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "| B2 | pending | — | — |", ""
+            ),
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("design defines B2", output)
+
     def test_chinese_project_gets_chinese_instructions(self) -> None:
         self.write("docs/flow/profile.toml", PROFILE.format(language="zh"))
         code, output = self.run_flow("handoff", ITEM_ID)

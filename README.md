@@ -22,12 +22,12 @@ A closed loop with a machine at the end of it:
 request
   -> clarify (<=5 questions, once)
   -> work item (item.md, AC)
-  -> design (only when the change is large or risky)
-  -> batches (B1..Bn, every AC covered)
-  -> implement -> verify -> commit, per batch
+  -> design (when profile.required_for or risk_paths says so; M by default)
+  -> batches (B1..Bn, ordered, every AC covered)
+  -> implement -> verify (append evidence) -> commit, per batch
   -> gate (the project's own commands, not ours)
   -> release record (optional channel)
-  -> done (AC checked, evidence present)
+  -> done (AC checked, evidence, gate PASS, identity)
 ```
 
 Three things make it different from a checklist:
@@ -78,7 +78,9 @@ Three things make it different from a checklist:
 
 4. **Ask the agent.** "Set up lite-dev in this repo", or go straight to
    "implement X". The skill triggers on implementation, fix, design, and release
-   requests.
+   requests. `flow.py design <ID>` scaffolds the design when one is required.
+   Every item closes with a cumulative `test-report.md`, a recorded full-level
+   gate PASS, and an identity.
 
 5. **Check anytime.**
 
@@ -97,9 +99,9 @@ skills/lite-dev/            the installable skill: everything is inside
   references/               invariants + depth, loaded per situation
   templates/                item, design, test report, implementation, release, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
-  scripts/flow.py           new / claim / whoami / status / check / design-ready /
-                            gate / done / handoff / archive / unarchive / release /
-                            reconcile / extensions
+  scripts/flow.py           new / claim / whoami / status / check / design /
+                            design-ready / gate / done / drop / handoff / archive /
+                            unarchive / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
                             gate ledger, handoff, archive, command runner,
                             atomic writes and the writer lock
@@ -115,14 +117,15 @@ examples/minimal/           a working single-repo project
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
 | required fields, links, AC↔batch↔verification | code and tests |
-| evidence completeness (one command and output per AC, verdict) | whether the evidence is sufficient |
-| design gate (confirmation, rollback, gaps) | failure diagnosis |
-| running profile commands, exit codes | black-box acceptance judgement |
-| release chain ordered by commit ancestry | deployment judgement |
+| evidence completeness for every item (one command and output per AC, verdict) | whether the evidence is sufficient |
+| design gate (confirmation, rollback, gaps, ordered batch graph) | failure diagnosis |
+| running profile commands, exit codes, recorded full-level PASS | black-box acceptance judgement |
+| release chain ordered by commit ancestry; bookkeeping vs debt | deployment judgement |
 | handoff prompt assembled from the artifacts | the judgement behind the next step |
-| document reachability, index-graph connectivity, entry-document pins | whether the prose is true |
+| document reachability, index-graph connectivity, entry-document pins, archive index | whether the prose is true |
 | decision chains, exemption expiry, item staleness from git | what should be cleaned up or re-reviewed |
 | risk-path design gate, per-clone gate freshness | how risky a change actually is |
+| identity, claim/takeover, archived read-only lifecycle | who is trusted to change what |
 
 Anything left of the line is a script because agents self-report it badly.
 Anything right of the line is prose because a script would get it wrong.
@@ -141,25 +144,28 @@ Anything right of the line is prose because a script would get it wrong.
 ```bash
 flow.py release --channel staging      # plan: gate, commits, debt, record path
 flow.py release --channel staging --record --rollback "..." --note "..."
-flow.py release --channel staging --record --rollback "..." --confirm "..."
+flow.py release --channel staging --record --rollback "..." --confirm "..." --confirmed-by "..."
 flow.py reconcile                      # advisory debt report; never blocks
 flow.py extensions                     # what each add-on contributes
 ```
 
 `--record` runs the gate itself; a previous run is not evidence. It refuses a
-dirty tree, a branch other than `release.mainline`, an empty rollback, a source
-that does not descend from the recorded tip, or commits without work items that
-are not written into `--note`. With `[release] confirm_risk_paths`, a range that
-touches `[design] risk_paths` also needs `--confirm`: the record keeps the
-human's words, not only the rollback.
+dirty tree, a branch other than `release.mainline`, a clone behind its upstream,
+an empty rollback, a source that does not descend from the recorded tip, or
+commits without work items that are not written into `--note`. Commits that only
+add release records or archive an item are bookkeeping, not debt. With
+`[release] confirm_risk_paths`, a range that touches `[design] risk_paths` also
+needs `--confirm`; `--confirmed-by` names the authorizer when it is not the
+recorder. The record keeps the human's words, not only the rollback.
 
 Extensions are declarative and additive: commands, gate steps, required docs,
 risk paths. The loader rejects command collisions, unknown keys, and an
 incompatible `requires` range. A bundled extension may ship a script and name it
 with `{skill}`, which the loader expands to the installed skill directory.
 
-Bundled: `go-service` (build/vet/test and Go risk paths), `security-scan` (fails
-on tracked credentials), `deploy-lane` (validates deployment manifests).
+Bundled: `go-service` (build/vet/test and Go risk paths; build output goes to a
+temp directory), `security-scan` (fails on credentials in the index or untracked
+non-ignored files), `deploy-lane` (validates deployment manifests).
 
 ## Teams and multiple machines
 
@@ -176,12 +182,16 @@ parallel agent sessions:
 - **Ownership is explicit.** `owner` is required and resolved from `--owner`,
   `$LITE_DEV_OWNER`, or `git config lite-dev.owner` — never from `user.name`.
   `whoami` shows the value and its source; `claim` takes over an item and
-  `status --mine` filters. Taking over someone's open item needs `--takeover`,
-  `done` records `closed_by`, and an optional `[project] owners` roster makes
-  `check` flag a spelling no one else uses.
+  `status --mine` filters. Taking over someone's open item needs
+  `--takeover --reason "..."`; closed items cannot be claimed and archived items
+  are read-only until unarchived. `done` requires an identity, records
+  `closed_by`, and an optional `[project] owners` roster makes `check` flag a
+  non-canonical spelling.
 - **Releases are ordered by the commit graph.** `--record` only runs on the
-  mainline, a stale clone is refused instead of recording an older source, and
-  an unreadable or divergent record stops the release.
+  mainline; a clone behind its upstream is refused; an unfetched clone cannot be
+  detected, so pull first. An unreadable or divergent record stops the release;
+  a bad record from a stale clone is repaired with a revert commit, never an
+  edit.
 
 `gate --work <ID>` validates that item plus the required documents, so a
 teammate's unfinished item does not block your batch; a bare `check` and a
@@ -196,13 +206,15 @@ Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 ## Status
 
 The current release implements `new`, `claim`, `whoami`, `status` (with
-`--stale`), `check`, `design-ready`, `gate`, `done`, `handoff`, `archive`,
-`unarchive`, `release`, `reconcile`, `extensions`, the templates (including
-`decision.md`), the invariants, document hygiene checks, index-graph
-connectivity, decision chains, the expiring exemption ledger, evidence
-completeness (`done` refuses a designed item without a passing test report), the
-risk-path design gate, the per-clone gate ledger, three bundled extensions, and a
-runnable single-repo example. Planned: a multi-repo workspace profile.
+`--stale`), `check`, `design`, `design-ready`, `gate`, `done`, `drop`, `handoff`,
+`archive`, `unarchive`, `release`, `reconcile`, `extensions`, the templates
+(including `decision.md`), the invariants, document hygiene checks, index-graph
+connectivity, decision chains, the expiring exemption ledger, cumulative
+evidence (`done` refuses any item without a passing report, a recorded full-level
+gate PASS, and an identity), ordered batch graphs, the risk-path design gate, the
+per-clone gate ledger, release bookkeeping/debt separation, three bundled
+extensions, and a runnable single-repo example. Planned: a multi-repo workspace
+profile.
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

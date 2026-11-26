@@ -128,11 +128,12 @@ class ReleaseTest(unittest.TestCase):
 
     def run_flow(self, *args: str) -> tuple[int, str]:
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             code = flow.main(
                 ["--profile", str(self.root / "docs/flow/profile.toml"), *args]
             )
-        return code, output.getvalue()
+        return code, output.getvalue() + errors.getvalue()
 
     def record_paths(self) -> list[Path]:
         directory = self.root / "docs/releases"
@@ -182,6 +183,87 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(len(data["no_item"]), 1)
         self.assertEqual(data["missing_item"][0]["item"], MISSING_ID)
         self.assertTrue(data["blocking"])
+
+    def test_release_record_commit_is_bookkeeping_not_debt(self) -> None:
+        self.assertEqual(self.record_release()[0], 0)
+        self.commit("docs: record the release")
+        code, output = self.run_flow("reconcile", "--channel", "staging", "--json")
+        self.assertEqual(code, 0, output)
+        data = json.loads(output)
+        self.assertEqual(data["no_item"], [])
+        self.assertEqual(len(data["bookkeeping"]), 1)
+        self.assertFalse(data["blocking"])
+
+    def test_record_commit_does_not_need_a_note_on_the_next_release(self) -> None:
+        self.assertEqual(self.record_release()[0], 0)
+        self.commit("docs: record the release")
+        code, output = self.run_flow(
+            "release", "--channel", "staging", "--record", "--rollback", "revert"
+        )
+        self.assertEqual(code, 0, output)
+        self.assertEqual(len(self.record_paths()), 2)
+
+    def test_archived_item_id_is_not_reported_missing(self) -> None:
+        archived_id = "20260101-REQ-arch22"
+        self.write(
+            f"docs/work/_archive/2026-01/{archived_id}-old/item.md",
+            ITEM.replace(ITEM_ID, archived_id).replace("closed:", "closed: 2026-01-02"),
+        )
+        self.commit("chore: archive old item")
+        self.commit(f"feat: follow-up ({archived_id})", "src/y.py", "y = 1\n")
+        code, output = self.run_flow("reconcile", "--channel", "staging", "--json")
+        self.assertEqual(code, 0, output)
+        data = json.loads(output)
+        self.assertEqual(data["missing_item"], [])
+
+    def test_missing_item_is_labelled_in_the_record(self) -> None:
+        self.commit(f"feat: wire x ({MISSING_ID})", "src/x.py", "x = 1\n")
+        self.assertEqual(self.record_release()[0], 0)
+        text = self.record_paths()[0].read_text(encoding="utf-8")
+        self.assertIn(f"(missing) {MISSING_ID}", text)
+
+    def test_risky_commit_with_an_item_is_still_reported(self) -> None:
+        self.commit(f"feat: migration ({ITEM_ID})", "migrations/0001.sql", "select 1;\n")
+        code, output = self.run_flow("reconcile", "--channel", "staging", "--json")
+        self.assertEqual(code, 0, output)
+        data = json.loads(output)
+        self.assertEqual(len(data["risky_with_item"]), 1)
+        self.assertEqual(data["risky_no_item"], [])
+
+    def test_release_since_cannot_start_after_the_recorded_tip(self) -> None:
+        self.assertEqual(self.record_release()[0], 0)
+        self.commit("docs: record the release")
+        record_commit = self.head()
+        code, output = self.run_flow(
+            "release",
+            "--channel",
+            "staging",
+            "--record",
+            "--since",
+            record_commit,
+            "--rollback",
+            "revert",
+            "--note",
+            "x",
+        )
+        self.assertEqual(code, 2, output)
+        self.assertIn("starts after the recorded tip", output)
+
+    def test_behind_upstream_is_refused(self) -> None:
+        remote = Path(self._tmp.name) / "origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+        self.git("remote", "add", "origin", str(remote))
+        self.git("push", "-q", "-u", "origin", "main")
+        base = self.head()
+        ahead = self.commit("feat: ahead", "src/ahead.py", "x = 1\n")
+        self.git("update-ref", "refs/remotes/origin/main", ahead)
+        self.git("reset", "--hard", "-q", base)
+        code, output = self.run_flow(
+            "release", "--channel", "staging", "--record", "--rollback", "revert"
+        )
+        self.assertEqual(code, 1, output)
+        self.assertIn("behind its upstream", output)
+        self.assertEqual(self.record_paths(), [])
 
     def test_release_refuses_without_note_when_debt_exists(self) -> None:
         code, output = self.run_flow(
@@ -239,12 +321,15 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("migrations/", output)
         self.assertEqual(self.record_paths(), [])
 
-        code, output = self.record_release("--confirm", "ops approved the migration")
+        code, output = self.record_release(
+            "--confirm", "ops approved the migration", "--confirmed-by", "Ops Lead"
+        )
         self.assertEqual(code, 0, output)
         text = self.record_paths()[0].read_text(encoding="utf-8")
         section = text.split("## Authorization", 1)[1].split("## Notes", 1)[0]
         self.assertIn("Required: yes", section)
-        self.assertIn("Confirmed by: releaser", section)
+        self.assertIn("Confirmed by: Ops Lead", section)
+        self.assertIn("Recorded by: releaser", section)
         self.assertIn("ops approved the migration", section)
 
     def test_dry_run_is_read_only(self) -> None:

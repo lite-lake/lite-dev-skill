@@ -32,15 +32,19 @@ flow.py release --channel prod --record \
 1. `check` passes: broken artifacts block a release.
 2. The working tree is clean.
 3. The current branch is `[release] mainline`; a feature branch and a detached
-   HEAD are refused.
+   HEAD are refused. A clone behind its upstream is refused; an unfetched clone
+   cannot be detected, so pull first.
 4. The channel's records form one unbroken chain, and HEAD descends from its tip.
 5. `--rollback` is non-empty; `--artifact` is present when the profile requires it.
-6. Commits without work items are written into `--note`.
+6. Commits without work items must be listed in `--note`. Commits that only add
+   release records or archive an item are bookkeeping and need no note.
 7. With `confirm_risk_paths`, a range that touches `[design] risk_paths` has
-   `--confirm`; the record's `## Authorization` then names the human and keeps
-   their words verbatim.
+   `--confirm`; `--confirmed-by` names the authorizer when it is not the
+   recorder. The record keeps the human's words verbatim.
 8. `gate_level` passes: FAIL means no record. The gate runs inside `--record`;
    a previous run is not evidence.
+9. `--since` may start earlier than the recorded tip (a first-release baseline)
+   but never later; it cannot skip debt between the tip and HEAD.
 
 The recorder and the tool version are stored in the record (`by`, `tool`).
 
@@ -56,8 +60,10 @@ independently cannot disagree about which one is latest.
   release: fetch first.
 - A source that is not a descendant of the tip means this clone is behind or on
   a different history. Pull or rebase; the tool will not record an older source.
-- Two records that are not on one history are divergent. The channel is broken
-  until someone records again from the true tip — do not delete the evidence.
+- Two records that are not on one history are divergent. Do not delete or edit
+  the evidence. If the bad record came from a stale clone, revert the commit
+  that added it (a new commit), then record again from the true tip. The tool
+  refuses to record while the chain is ambiguous; the revert is the repair.
 - An unreadable record (missing or non-sha `source`) is an error, not a record
   to skip.
 
@@ -83,3 +89,9 @@ The tool records; it does not push branches, build, or deploy.
 A hotfix is a one-shot item on the main line, released through the same path.
 It still passes the gate and still writes a record; urgency lowers scope, not
 evidence.
+
+Before switching to main, park dirty WIP (stash or a pushed WIP commit); git
+will refuse to switch over it. A hotfix under `[design] risk_paths` still needs
+a short ready design at any size, or a range that avoids the path; there is no
+size exemption. With `confirm_risk_paths`, the record needs `--confirm` and,
+when the authorizer is not the recorder, `--confirmed-by`.

@@ -6,6 +6,9 @@ A bundled, declarative extension for Go services. It only **adds**:
 - gate steps: `l1 += go_build`, `l2 += go_test`, `l3 += go_vet`
 - reconcile risk paths: `migrations/`, `internal/auth/`
 
+`go_build` writes its output to a temporary directory, so a passing gate does
+not dirty the working tree and `release --record` still accepts it.
+
 Enable it in the project profile:
 
 ```toml

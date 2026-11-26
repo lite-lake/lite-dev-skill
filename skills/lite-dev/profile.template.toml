@@ -17,7 +17,7 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.3.6,<0.4"
+requires = ">=0.3.7,<0.4"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of
@@ -41,7 +41,8 @@ fallback_paths = []
 fresh_days = 5
 
 [design]
-# Sizes that require design.md before implementation.
+# Sizes that require design.md before implementation. M is still a one-session
+# change; the design is the record of the plan, not a second execution mode.
 required_for = ["L", "M"]
 # The human must confirm the plan before design-ready passes.
 require_confirmed = true
@@ -58,7 +59,7 @@ risk_gate = "warn"
 [commands]
 # Any shell command run from the project root. This file is executable input:
 # treat it as trusted project configuration, not as data from an untrusted source.
-test = "echo 'replace me with your real test command'"
+test = "echo 'configure [commands] test in docs/flow/profile.toml' >&2; exit 1"
 # lint = "your linter"
 # unit = "your unit test command"
 # e2e = "your end-to-end command"

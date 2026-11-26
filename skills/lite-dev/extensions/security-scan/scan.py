@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Fail when a git-tracked file looks like a committed credential.
+"""Fail when a file that could be committed looks like a credential.
 
 Generic on purpose: the rules are shapes (private keys, access keys, URLs with
 inline credentials, JWT, secret assignments), and the allowlist is project data.
-Run it from the project root; it reads `git ls-files`, so nothing untracked and
-nothing inside `.git` is scanned.
+Run it from the project root; it reads the index plus untracked non-ignored
+files, so a new `.env` is caught before the commit that would publish it.
 
     python3 scan.py [--allow docs/flow/security-allow.txt]
 
@@ -45,7 +45,7 @@ RULES: list[tuple[str, re.Pattern]] = [
 
 def tracked_files(root: Path) -> list[str]:
     process = subprocess.run(
-        ["git", "ls-files", "-z"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=root,
         capture_output=True,
         text=True,
@@ -77,7 +77,7 @@ def findings_for(path: Path, entry: str) -> list[str]:
     findings: list[str] = []
     name = Path(entry).name
     if name in SENSITIVE_NAMES or path.suffix.lower() in SENSITIVE_SUFFIXES:
-        findings.append(f"{entry}: sensitive file is tracked")
+        findings.append(f"{entry}: sensitive file would be committed")
     try:
         if path.stat().st_size > MAX_BYTES:
             return findings
@@ -97,7 +97,7 @@ def findings_for(path: Path, entry: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="scan git-tracked files for credentials")
+    parser = argparse.ArgumentParser(description="scan files that could be committed for credentials")
     parser.add_argument("--allow", default=DEFAULT_ALLOW, help="allowlist file (path prefixes)")
     args = parser.parse_args(argv)
 
@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         text=True,
     )
     if process.returncode != 0 or process.stdout.strip() != "true":
-        print("error: not a git repository; the scan reads tracked files only")
+        print("error: not a git repository; the scan reads the index and untracked files")
         return 2
 
     allowlist = read_allowlist(root, args.allow)
@@ -125,12 +125,12 @@ def main(argv: list[str] | None = None) -> int:
         findings.extend(findings_for(path, entry))
 
     if findings:
-        print(f"FAIL: {len(findings)} finding(s) in {scanned} tracked file(s)")
+        print(f"FAIL: {len(findings)} finding(s) in {scanned} candidate file(s)")
         for finding in findings:
             print(f"  {finding}")
         print("  fix: remove the value, rotate it, and record a false positive in " + args.allow)
         return 1
-    print(f"PASS: {scanned} tracked file(s); no credentials found")
+    print(f"PASS: {scanned} candidate file(s); no credentials found")
     return 0
 
 

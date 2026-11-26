@@ -42,12 +42,13 @@ closed_by:
 ## Implementation
 
 > Batch rows must match `## Batches` in design.md. Use pending / doing / done / blocked.
+> A one-shot item with no design keeps this table empty.
 
 | Batch | Status | Commit | Notes |
 |---|---|---|---|
-| B1 | pending | — | — |
 
 ## Notes
 
+- Artifacts: `design.md` (if required), `implementation.md` (two-phase), `test-report.md` (evidence).
 - Rollback:
 - Dependencies:

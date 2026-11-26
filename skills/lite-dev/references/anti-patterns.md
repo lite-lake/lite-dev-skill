@@ -39,7 +39,7 @@ not more effort.
 11. **Upstream success as evidence.** CI green means the build passed, not that
     the new artifact is deployed; a previous gate PASS is not evidence for this
     commit. Fix: evidence names the command and its output for the artifact you
-    are closing; `done` refuses a designed item without it.
+    are closing; `done` refuses any item without it.
 
 12. **Sleeping on a build.** A fixed sleep pulls the old image or reads a stale
     report. Fix: poll the timestamp or the status, with a bound, and stop when

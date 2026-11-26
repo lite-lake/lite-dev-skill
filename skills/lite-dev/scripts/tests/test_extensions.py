@@ -122,6 +122,7 @@ class ExtensionTest(unittest.TestCase):
         with self.assertRaises(profile_mod.ProfileError) as caught:
             self.load()
         self.assertIn("requires lite-dev", str(caught.exception))
+        self.assertIn("install the matching skill version", str(caught.exception))
 
     def test_missing_requires_is_an_error(self) -> None:
         lines = [line for line in EXTENSION.splitlines() if not line.startswith("requires")]
@@ -165,12 +166,15 @@ class ExtensionTest(unittest.TestCase):
         self.assertIn(f"lite-dev {flow.__version__}", output)
         self.assertIn("demo 1.0.0", output)
         self.assertIn("gate l1 += demo_test", output)
+        self.assertIn("docs required += docs/design/README.md", output)
+        self.assertIn("reconcile risk paths += migrations/", output)
 
     def test_bundled_extension_loads(self) -> None:
         self.write_profile('"go-service"')
         profile = self.load()
         self.assertEqual(profile.extension_info[0]["source"], "bundled")
         self.assertIn("go_build", profile.commands)
+        self.assertIn("mktemp -d", profile.commands["go_build"])
         self.assertEqual(profile.gate["l1"], ["test", "go_build"])
 
 

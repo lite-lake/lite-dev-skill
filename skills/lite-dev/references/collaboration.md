@@ -29,9 +29,11 @@ A team can pin the canonical spellings:
 owners = ["Alice Chen", "Bob Li"]
 ```
 
-`check` then warns about any item owned by someone outside the list. It is a
-warning, not an error: a one-off helper may still own an item. Without a roster,
-`check` still warns when two owners differ only by case or spacing.
+`check` then warns about any item owned by someone outside the list, and about a
+non-canonical spelling of a rostered name (for example `Alice  Chen` when the
+roster says `Alice Chen`). It is a warning, not an error: a one-off helper may
+still own an item. Without a roster, `check` still warns when two owners differ
+only by case or spacing.
 
 ## Ids
 
@@ -63,14 +65,19 @@ The only real collision is the same millisecond, described above.
 ## Claiming
 
 `new` sets the owner. `claim <ID>` reassigns it. When the item is still open and
-someone else owns it, `claim` refuses until you pass `--takeover`: a mistyped id
-must not silently take work away from a teammate. `status --mine` lists your
+someone else owns it, `claim` refuses until you pass
+`--takeover --reason "..."`: a mistyped id must not silently take work away from
+a teammate, and the reason is written into the item (`takeover_by`,
+`takeover_reason`). A closed item cannot be claimed; create a new item instead.
+An archived item is read-only until `unarchive`. `status --mine` lists your
 items. Ownership is a coordination signal, not a lock: two people editing one
 item still merge their work.
 
-`done` writes `closed_by` into the item and warns when the closer is not the
-owner. It still closes: the verifier may be a different person from the
-implementer, and invariant 5 wants exactly that.
+`done` requires an identity, writes `closed_by` into the item, and warns when
+the closer is not the owner. It still closes: the verifier may be a different
+person from the implementer, and invariant 5 wants exactly that. The closer
+must also have run the item's full-level gate in that clone; the ledger is
+local, so a teammate cannot close on your PASS.
 
 If two people really need one item, one owns it and the other reviews. Parallel
 edits to the same `item.md` — AC ticks, the progress row, the clarify answers —
@@ -92,12 +99,17 @@ with different rules.
   HEAD, or a channel branch is refused.
 - The watermark is the ancestry tip of the channel's records, not the newest
   filename. A record whose `source` is not in your clone means "fetch first".
-- Your HEAD must descend from the recorded tip. A stale clone is refused instead
-  of silently recording an older source.
+- Your HEAD must descend from the recorded tip, and `release --record` refuses
+  a clone that is behind its upstream. An **unfetched** clone cannot be
+  detected locally: `behind 0` proves nothing until you fetch. Pull before you
+  record; this is a hard precondition, not a suggestion.
 - Divergent records, a broken `previous` chain, or an unreadable record stop the
-  release. Resolve them; do not edit history.
-- Commit the record before the next release. Include `--artifact` when the
-  profile requires artefacts.
+  release. Do not edit a record. If a stale clone already recorded one, revert
+  the commit that added the bad record (a new commit), then record again from
+  the true tip.
+- Commit the record before the next release. That commit is bookkeeping, not
+  debt; `reconcile` will not make you write a note for it. Include `--artifact`
+  when the profile requires artefacts.
 
 ## One person, several machines
 

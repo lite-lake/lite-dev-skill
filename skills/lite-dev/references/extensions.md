@@ -67,14 +67,15 @@ flow.py extensions
 ```
 
 Prints the lite-dev version, each extension's source (project or bundled), its
-`requires` range, and exactly what it adds.
+`requires` range, and exactly what it adds: commands, gate steps, required
+documents, and reconcile risk paths.
 
 ## Bundled
 
 | Extension | Adds | Use when |
 |---|---|---|
-| `go-service` | build/vet/test commands and Go risk paths | the repository is a Go service |
-| `security-scan` | `security_scan` at l3; fails on tracked credentials | always, unless another scanner covers it |
+| `go-service` | build/vet/test commands and Go risk paths; build output goes to a temp directory | the repository is a Go service |
+| `security-scan` | `security_scan` at l3; fails on credentials in the index or untracked non-ignored files | always, unless another scanner covers it |
 | `deploy-lane` | `deploy_check` at l3; validates deployment manifests | one commit ships to more than one environment |
 
 Bundled extensions ship their scripts inside

@@ -6,7 +6,7 @@ work_dir = "docs/work"
 # owners = ["Your Name"]    # optional: check warns about any other spelling
 
 [flow]
-requires = ">=0.3.5,<0.4"
+requires = ">=0.3.7,<0.4"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -19,11 +19,12 @@ l3 = ["test", "lint", "e2e"]
 fallback_paths = []
 
 [design]
-required_for = ["L"]
+required_for = ["L", "M"]
 require_confirmed = true
-# Structural paths: a change here needs a ready design. `src/` here is only an
-# example — a real project lists its contracts, schema, and deploy scripts.
-risk_paths = ["src/"]
+# Structural paths: a change here needs a ready design. A real project lists
+# its contracts, schema, and deploy scripts; the example keeps this empty so a
+# small S change does not trip the rule.
+risk_paths = []
 risk_exempt = ["docs/"]
 risk_gate = "warn"
 

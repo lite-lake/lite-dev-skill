@@ -91,7 +91,12 @@ def archive(profile: Profile, item_id: str, reason: str = "", force: bool = Fals
     if not closed and not force:
         raise FlowError(
             f"{item.id} is not closed ({item.status}); close it with flow.py done <ID>, "
-            "or pass --force to archive it unfinished"
+            "or drop it with flow.py drop <ID> --reason \"...\""
+        )
+    if not closed and force and not reason.strip():
+        raise FlowError(
+            f"{item.id} is not closed ({item.status}); --force needs --reason "
+            "\"why this unfinished item is being retired\""
         )
     target = target_for(profile, item)
     if target.exists():

@@ -159,8 +159,9 @@ class GateRulesTest(unittest.TestCase):
         )
         code, output = self.run_flow("status")
         self.assertEqual(code, 0)
-        self.assertIn("l3 last passed", output)
-        self.assertIn("run `gate --level l3`", output)
+        # A clarified item is not closeable yet; status stays quiet. The cheaper
+        # gate still surfaces the stale full-level PASS.
+        self.assertNotIn("l3 last passed", output)
 
         code, output = self.run_flow("gate", "--level", "l1", "--work", ITEM_ID)
         self.assertEqual(code, 0, output)

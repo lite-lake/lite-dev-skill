@@ -6,15 +6,18 @@ in the project's language.
 """
 from __future__ import annotations
 
+import re
+import shlex
 from pathlib import Path
 
-from . import artifacts
+from . import artifacts, checks
 from .errors import FlowError
 from .profile import Profile
 
 FLOW = Path(__file__).resolve().parents[1] / "flow.py"
 DONE_STATES = {"done", "完成", "closed"}
 DOING_STATES = {"doing", "进行中", "in-progress"}
+BLOCKED_STATES = {"blocked", "阻塞"}
 
 INSTRUCTIONS = {
     "en": {
@@ -25,12 +28,19 @@ INSTRUCTIONS = {
         "next": "Next: {batch} — {goal}",
         "next_only": "Next: {batch}",
         "next_none": "Next: every batch is done; run the final gate, then close the item.",
+        "blocked": "blocked",
+        "resume": "Resume {batch} (in progress): {goal}",
+        "blocked_next": "Next: {batch} — {goal} (BLOCKED; resolve it before dispatching)",
+        "design_no_batches": "design.md has no ## Batches table",
         "rules": "Rules:",
         "rule_no_redesign": "- Do not redesign; the plan is confirmed{when}.",
+        "rule_unconfirmed": "- design.md is not ready or not confirmed: return to Phase A and run design-ready.",
         "rule_batches": "- Dispatch every unfinished batch in order. A finished batch is not a stop condition.",
         "rule_commit": "- Only the commit role commits. Update `## Implementation` after each batch.",
         "rule_stop": "- Stop on the conditions in SKILL.md section 9, then update progress first.",
         "gate": "Gate: {command}",
+        "commit_gate": "Commit gate: {command}",
+        "warnings": "Warnings:",
         "batch_intro": "You are the implement role for work item {id}, batch {batch}.",
         "batch_row": "Batch {batch}: {goal}; repo {repo}; covers {ac}; depends on {depends}.",
         "batch_rules": "Rules:",
@@ -53,12 +63,19 @@ INSTRUCTIONS = {
         "next": "下一步：{batch} — {goal}",
         "next_only": "下一步：{batch}",
         "next_none": "下一步：全部批次已完成；跑最终门禁，然后收尾。",
+        "blocked": "阻塞",
+        "resume": "继续 {batch}（进行中）：{goal}",
+        "blocked_next": "下一步：{batch} — {goal}（阻塞中；先解决再派发）",
+        "design_no_batches": "design.md 没有 ## Batches 表",
         "rules": "规则：",
         "rule_no_redesign": "- 不要重新设计；方案已于{when}确认。",
+        "rule_unconfirmed": "- design.md 尚未 ready 或未确认：回到 Phase A，跑 design-ready。",
         "rule_batches": "- 按顺序派发每一个未完成批次。完成一个批次不是停止条件。",
         "rule_commit": "- 只有提交角色提交。每批完成后更新 `## Implementation`。",
         "rule_stop": "- 触发 SKILL.md 第 9 节的停止条件就停下，并先更新进度。",
         "gate": "门禁：{command}",
+        "commit_gate": "提交门禁：{command}",
+        "warnings": "警告：",
         "batch_intro": "你是工作项 {id} 批次 {batch} 的 implement 角色。",
         "batch_row": "批次 {batch}：{goal}；仓库 {repo}；覆盖 {ac}；依赖 {depends}。",
         "batch_rules": "规则：",
@@ -96,6 +113,8 @@ def batch_state(item: artifacts.Item, batch_id: str) -> str:
             return "done"
         if state in DOING_STATES:
             return "doing"
+        if state in BLOCKED_STATES:
+            return "blocked"
         return "pending"
     return "pending"
 
@@ -131,11 +150,46 @@ def _field(row: dict[str, str], *names: str, default: str = "-") -> str:
 
 def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> str:
     words = _text(profile)
-    gate = f"python3 {FLOW} gate --level l1 --work {item.id}"
+    command = shlex.quote(str(FLOW))
+    gate = f"python3 {command} gate --level l1 --work {item.id}"
     lines: list[str] = []
 
     if batch:
+        if item.design_path is None:
+            raise FlowError(
+                f"{item.id} has no design.md; drop --batch and hand off the item instead"
+            )
+        if item.design_status != "ready":
+            raise FlowError(
+                f"{item.id} design is not ready (status: {item.design_status or 'draft'}); "
+                "finish the design and run design-ready before dispatching a batch"
+            )
+        problems = checks.design_errors(item, profile)
+        if problems:
+            raise FlowError(
+                f"{item.id} design.md is marked ready but invalid: {problems[0]}; "
+                "run check for the full list"
+            )
+        state = batch_state(item, batch)
+        if state == "done":
+            nxt = next_batch(item)
+            raise FlowError(
+                f"batch {batch} is already done; continue with {nxt or 'the final gate'}"
+            )
+        if state == "blocked":
+            raise FlowError(
+                f"batch {batch} is blocked; resolve the blocker before dispatching it"
+            )
         row = _row(item, batch)
+        depends = artifacts.row_value(row, "Depends", "依赖").strip()
+        for dependency in re.split(r"[,，;；\s]+", depends):
+            if not dependency or dependency in {"-", "—"}:
+                continue
+            if batch_state(item, dependency) != "done":
+                raise FlowError(
+                    f"batch {batch} depends on {dependency}, which is not done; "
+                    "finish it before dispatching this batch"
+                )
         lines.append(
             words["batch_intro"].format(id=item.id, batch=batch) + f"  ({item.meta.get('title', '')})"
         )
@@ -188,24 +242,50 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
         lines.append(handoff)
         lines.append("")
 
+    design_problems = (
+        checks.design_errors(item, profile) if item.design_status == "ready" else []
+    )
+
     ids = batch_ids(item)
     if ids:
         summary = ", ".join(
-            f"{batch_id} {words[batch_state(item, batch_id)]}" for batch_id in ids
+            f"{batch_id} {words.get(batch_state(item, batch_id), batch_state(item, batch_id))}"
+            for batch_id in ids
         )
         lines.append(words["batches"].format(summary=summary))
         upcoming = next_batch(item)
         if upcoming:
             goal = _field(_row(item, upcoming), "Goal", "目标", default="")
-            if goal:
+            state = batch_state(item, upcoming)
+            if state == "blocked":
+                lines.append(
+                    words["blocked_next"].format(batch=upcoming, goal=goal or "-")
+                )
+            elif state == "doing":
+                lines.append(words["resume"].format(batch=upcoming, goal=goal or "-"))
+            elif goal:
                 lines.append(words["next"].format(batch=upcoming, goal=goal))
             else:
                 lines.append(words["next_only"].format(batch=upcoming))
+            depends = _field(_row(item, upcoming), "Depends", "依赖", default="")
+            if depends:
+                lines.append(f"Depends: {depends}")
         else:
             lines.append(words["next_none"])
         lines.append("")
+    elif item.design_path is not None:
+        lines.append(words["batches"].format(summary=words["design_no_batches"]))
+        lines.append("")
     else:
         lines.append(words["batches"].format(summary=words["no_design"]))
+        lines.append("")
+
+    warnings = checks.item_warnings(item, profile)
+    warnings.extend(f"design.md: {error}" for error in design_problems)
+    if warnings:
+        lines.append(words["warnings"])
+        for warning in warnings:
+            lines.append(f"- {warning}")
         lines.append("")
 
     lines.append(words["rules"])
@@ -223,9 +303,19 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
                     when = " " + value
         if item.clarify_state not in artifacts.CLARIFIED:
             lines.append(words["rule_unclarified"])
-        lines.append(words["rule_no_redesign"].format(when=when))
+        if item.design_status != "ready" or design_problems:
+            lines.append(words["rule_unconfirmed"])
+        else:
+            lines.append(words["rule_no_redesign"].format(when=when))
         for key in ("rule_batches", "rule_commit", "rule_stop"):
             lines.append(words[key])
     lines.append("")
     lines.append(words["gate"].format(command=gate))
+    full = profile.full_level
+    if full and full != "l1":
+        lines.append(
+            words["commit_gate"].format(
+                command=f"python3 {command} gate --level {full} --work {item.id}"
+            )
+        )
     return "\n".join(lines)

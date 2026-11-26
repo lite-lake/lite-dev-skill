@@ -4,7 +4,7 @@ description = "Go service: build, vet, and test with the standard toolchain."
 requires = ">=0.3.2,<0.4"
 
 [commands]
-go_build = "go build ./..."
+go_build = "go build -o \"$(mktemp -d)/\" ./..."
 go_test = "go test ./..."
 go_vet = "go vet ./..."
 

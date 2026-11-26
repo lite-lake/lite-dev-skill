@@ -293,7 +293,8 @@ def _merge_extension(
         raise ProfileError(f"extension '{name}': 'requires' is required, e.g. '>=0.2,<0.3'")
     if not satisfies(__version__, requires):
         raise ProfileError(
-            f"extension '{name}' requires lite-dev {requires}, but this is {__version__}"
+            f"extension '{name}' requires lite-dev {requires}, but this is {__version__}; "
+            "install the matching skill version or lower the extension's requires"
         )
 
     ext_commands = raw.get("commands") or {}
@@ -349,6 +350,23 @@ def _merge_extension(
         "source": source,
         "gate": {level: list(steps) for level, steps in ext_gate.items()},
         "commands": sorted(ext_commands),
+        "docs": list(
+            dict.fromkeys(
+                item
+                for item in _string_list(
+                    ext_docs.get("required", []), f"extension '{name}': [docs] required"
+                )
+            )
+        ),
+        "risk_paths": list(
+            dict.fromkeys(
+                item
+                for item in _string_list(
+                    ext_reconcile.get("risk_paths", []),
+                    f"extension '{name}': [reconcile] risk_paths",
+                )
+            )
+        ),
     }
 
 
@@ -410,6 +428,12 @@ def load(path: Path | str | None = None) -> Profile:
     id_table = raw["id"]
     commands = dict(raw["commands"])
     gate_table = raw["gate"]
+    # Validate the raw table first: filtering before validation used to drop a
+    # typo like `l4 = [...]` silently, leaving a gate level that looked defined.
+    _allow_keys(gate_table, (*LEVELS, "fallback_paths", "fresh_days"), "[gate]")
+    for level in LEVELS:
+        if level in gate_table and not isinstance(gate_table[level], list):
+            raise ProfileError(f"[gate] {level} must be a list of command names")
     gate = {
         level: list(steps)
         for level, steps in gate_table.items()
@@ -551,7 +575,19 @@ def load(path: Path | str | None = None) -> Profile:
         reconcile.get("risk_paths", []), "[reconcile] risk_paths"
     )
 
-    root = profile_path.parents[2]
+    # Normally <root>/docs/flow/profile.toml. Prefer the repository root when
+    # there is a .git; otherwise honor the conventional three-level path and
+    # fall back to the profile's own directory for a custom --profile file.
+    root = None
+    for parent in profile_path.parents:
+        if (parent / ".git").exists():
+            root = parent
+            break
+    if root is None:
+        if profile_path.parent.name == "flow" and profile_path.parent.parent.name == "docs":
+            root = profile_path.parents[2]
+        else:
+            root = profile_path.parent
     extensions_enabled, extensions_dir, extension_info = _apply_extensions(
         root, extensions, commands, gate, required_docs, risk_paths
     )

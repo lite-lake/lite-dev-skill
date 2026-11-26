@@ -5,10 +5,12 @@ Usage (from the project root):
     python3 <skill>/scripts/flow.py status [--mine] [--stale [--days N]]
     python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
     python3 <skill>/scripts/flow.py check [--work <ID>]
+    python3 <skill>/scripts/flow.py design <ID>
     python3 <skill>/scripts/flow.py design-ready <ID>
     python3 <skill>/scripts/flow.py gate --level l1 [--work <ID>]
-    python3 <skill>/scripts/flow.py claim <ID>
-    python3 <skill>/scripts/flow.py done <ID>
+    python3 <skill>/scripts/flow.py claim <ID> [--takeover --reason "..."]
+    python3 <skill>/scripts/flow.py done <ID> [--owner "Name"]
+    python3 <skill>/scripts/flow.py drop <ID> [--reason "..."]
     python3 <skill>/scripts/flow.py handoff <ID> [--batch <Bx>]
     python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
     python3 <skill>/scripts/flow.py unarchive <ID>
@@ -31,6 +33,14 @@ from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+if sys.version_info < (3, 11):
+    print(
+        "error: lite-dev requires Python 3.11+ (tomllib); "
+        f"this is {sys.version.split()[0]}. Run it with python3.11+ or newer.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
@@ -62,6 +72,7 @@ from flowlib.profile import (  # noqa: E402
 
 SKILL_DIR = SCRIPTS.parent
 TEMPLATE = SKILL_DIR / "templates" / "item.md"
+DESIGN_TEMPLATE = SKILL_DIR / "templates" / "design.md"
 
 STATUS_ORDER = {
     "need-clarify": 0,
@@ -73,7 +84,7 @@ STATUS_ORDER = {
 }
 NEXT_ACTION = {
     "need-clarify": "answer the clarifying questions, then set '- Status: clarified'",
-    "clarified": "write design.md, or start the change if no design is required",
+    "clarified": "start the change; add test-report, run gate, then done (write design.md first if required)",
     "designing": "finish design.md, then run design-ready {id}",
     "ready": "implement the batches, run the gate, then done {id}",
 }
@@ -193,7 +204,13 @@ def cmd_new(args) -> int:
 
     print(f"created {item_id}")
     print(f"  {(directory / 'item.md').relative_to(profile.root)}")
-    print("next: clarify the requirement, then set '- Status: clarified'")
+    if size in profile.design_required_for:
+        print(
+            "next: clarify the requirement, set '- Status: clarified', then "
+            f"`flow.py design {item_id}` (size {size} requires a design)"
+        )
+    else:
+        print("next: clarify the requirement, then set '- Status: clarified'")
     return 0
 
 
@@ -303,7 +320,10 @@ def cmd_status(args) -> int:
     checkout = _checkout(profile)
     items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
     full = profile.full_level
-    stale = gate_log.stale_line(profile, full) if full else None
+    # A fresh clone has no PASS yet; that is expected until an item is ready to
+    # close. Do not open every session with a warning it cannot act on.
+    gate_relevant = any(item.status in {"ready", "done"} for item in items)
+    stale = gate_log.stale_line(profile, full) if full and gate_relevant else None
     stale_rows: list[dict] = []
     stale_note = ""
     if args.stale:
@@ -329,9 +349,17 @@ def cmd_status(args) -> int:
                     "ac_done": item.ac_done,
                     "ac_total": item.ac_total,
                     "design": (
-                        "ready"
+                        (
+                            "ready!"
+                            if checks.design_errors(item, profile)
+                            else "ready"
+                        )
                         if item.design_status == "ready"
-                        else ("draft" if item.design_path else "")
+                        else (
+                            "draft"
+                            if item.design_path
+                            else ("required" if item.size in profile.design_required_for else "")
+                        )
                     ),
                     "path": str(item.directory.relative_to(profile.root)),
                 }
@@ -363,7 +391,7 @@ def cmd_status(args) -> int:
         print("  no work items" if not mine else f"  no items for {mine}")
         archived = len(artifacts.archived_items(profile))
         if archived:
-            print(f"{archived} archived (flow.py archive --help)")
+            print(f"{archived} archived ({profile.work_dir}/_archive/README.md)")
         if stale:
             print(f"\nwarn: {stale}")
         if args.stale:
@@ -371,8 +399,19 @@ def cmd_status(args) -> int:
         return 0
 
     rows = []
+    design_problems: dict[str, list[str]] = {}
     for item in items:
-        design = "ready" if item.design_status == "ready" else ("draft" if item.design_path else "-")
+        if item.design_status == "ready":
+            problems = checks.design_errors(item, profile)
+            if problems:
+                design_problems[item.id] = problems
+            design = "ready!" if problems else "ready"
+        elif item.design_path:
+            design = "draft"
+        elif item.size in profile.design_required_for:
+            design = "required"
+        else:
+            design = "-"
         rows.append(
             [
                 item.id,
@@ -398,15 +437,22 @@ def cmd_status(args) -> int:
     print(f"\n{len(items)} item(s): {summary}")
     archived = len(artifacts.archived_items(profile))
     if archived:
-        print(f"{archived} archived (flow.py archive --help)")
+        print(f"{archived} archived ({profile.work_dir}/_archive/README.md)")
     if stale:
         print(f"\nwarn: {stale}")
     if args.stale:
         _print_stale(stale_rows, stale_note, args.days)
 
+    for item_id, problems in design_problems.items():
+        extra = f" (+{len(problems) - 1} more; run check)" if len(problems) > 1 else ""
+        print(f"warn: {item_id} design.md is marked ready but invalid: {problems[0]}{extra}")
+
     next_lines = []
     for item in items:
-        template = NEXT_ACTION.get(item.status)
+        if item.status == "clarified" and item.size in profile.design_required_for:
+            template = "write design.md (flow.py design {id}), then run design-ready {id}"
+        else:
+            template = NEXT_ACTION.get(item.status)
         if template:
             next_lines.append(f"  {item.id}  {template.format(id=item.id)}")
     if next_lines:
@@ -445,9 +491,9 @@ def cmd_check(args) -> int:
 
     print(f"profile: {profile.path.relative_to(profile.root)}")
     if ok:
-        print(f"PASS: no errors ({len(warnings)} warning(s))")
+        print(f"PASS: no errors ({len(warnings)} warning(s); warnings do not block)")
     else:
-        print(f"FAIL: {len(errors)} error(s), {len(warnings)} warning(s)")
+        print(f"FAIL: {len(errors)} error(s), {len(warnings)} warning(s); errors block")
     _print_issues(errors, warnings)
     return 0 if ok else 1
 
@@ -455,6 +501,10 @@ def cmd_check(args) -> int:
 def cmd_design_ready(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
+    if artifacts.is_archived(item):
+        raise FlowError(
+            f"{item.id} is archived; run flow.py unarchive {item.id} before changing its design"
+        )
     errors = checks.design_errors(item, profile)
     if errors:
         print("FAIL: the design is not ready")
@@ -465,6 +515,31 @@ def cmd_design_ready(args) -> int:
         artifacts.set_frontmatter_value(item.design_path, "status", "ready")
     print(f"PASS: design marked ready ({item.design_path.relative_to(profile.root)})")
     print(f"next: implement the batches, then flow.py gate --level l1 --work {item.id}")
+    return 0
+
+
+def cmd_design(args) -> int:
+    """Create design.md from the template, so the scaffold is not guesswork."""
+    profile = _load_profile(args)
+    item = artifacts.find_item(profile, args.id)
+    if artifacts.is_archived(item):
+        raise FlowError(
+            f"{item.id} is archived; run flow.py unarchive {item.id} before designing it"
+        )
+    if item.design_path is not None:
+        raise FlowError(
+            f"{item.id} already has design.md; edit it and run design-ready"
+        )
+    if item.clarify_state not in artifacts.CLARIFIED:
+        raise FlowError(
+            "requirement is not clarified; set '- Status: clarified' in ## Clarify first"
+        )
+    text = DESIGN_TEMPLATE.read_text(encoding="utf-8").replace("<ID>", item.id)
+    with fsio.project_lock(profile.root):
+        fsio.atomic_write_text(item.directory / "design.md", text)
+    print(f"created {item.id} design.md")
+    print(f"  {(item.directory / 'design.md').relative_to(profile.root)}")
+    print(f"next: fill the plan, get the human's confirmation, then flow.py design-ready {item.id}")
     return 0
 
 
@@ -516,7 +591,7 @@ def cmd_gate(args) -> int:
             profile,
             args.level,
             timeout=args.timeout,
-            item=args.work or "",
+            item=item.id if item is not None else "",
         )
     except ProfileError as exc:
         print(f"error: {exc}")
@@ -547,12 +622,22 @@ def _mention_evidence(path: Path) -> None:
 def cmd_done(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
-    closer = identity.try_resolve(profile.root, None)
+    closer = identity.try_resolve(profile.root, args.owner)
 
     closed = (item.meta.get("closed") or "").strip()
     if closed:
         print(f"{item.id} is already closed ({closed})")
         return 0
+
+    if artifacts.is_archived(item):
+        raise FlowError(
+            f"{item.id} is archived; run flow.py unarchive {item.id} before changing it"
+        )
+    if closer is None:
+        raise FlowError(
+            "no identity: set git config lite-dev.owner \"Your Name\", "
+            "$LITE_DEV_OWNER, or pass --owner; `done` must record who closed the item"
+        )
 
     errors = checks.item_errors(item, profile)
     if item.ac_done != item.ac_total:
@@ -560,10 +645,18 @@ def cmd_done(args) -> int:
         errors.append(f"unchecked AC: {open_ids}")
     if item.size in profile.design_required_for and item.design_status != "ready":
         errors.append(f"size {item.size} needs a ready design before it can be done")
+    if item.design_path is not None:
+        if item.design_status != "ready":
+            errors.append(
+                f"design.md is {item.design_status or 'draft'}, not ready; "
+                "run design-ready (and fix it) before closing"
+            )
+        else:
+            errors.extend(checks.design_errors(item, profile))
     report = item.directory / "test-report.md"
-    if item.design_path is not None and not report.is_file():
+    if not report.is_file():
         errors.append(
-            f"{item.directory.name}: done requires test-report.md for a designed item; "
+            f"{item.directory.name}: done requires test-report.md; "
             "the AC tick is a claim, not evidence"
         )
     evidence_errors, evidence_warnings = checks.evidence_problems(item, strict=True)
@@ -576,8 +669,27 @@ def cmd_done(args) -> int:
     for warning in evidence_warnings:
         print(f"warn: {warning}")
 
+    full = profile.full_level
+    if full is None:
+        errors.append("the profile defines no gate level; cannot close an item without one")
+    elif gate_log.path_for(profile) is None:
+        errors.append(
+            "the gate ledger is unavailable (not a git repository); "
+            "lite-dev records a full-level PASS per clone, so run the flow inside git"
+        )
+    elif gate_log.last_pass_for(profile, full, item.id) is None:
+        errors.append(
+            f"no {full} PASS recorded for {item.id} in this clone; "
+            f"run `flow.py gate --level {full} --work {item.id}` before closing"
+        )
+    if errors:
+        print("FAIL: cannot close the work item")
+        for error in errors:
+            print(f"  - {error}")
+        return 1
+
     owner = (item.meta.get("owner") or "").strip()
-    if closer and owner and not identity.same(owner, closer[0]):
+    if owner and not identity.same(owner, closer[0]):
         print(
             f"warn: {item.id} is owned by {owner}; closing as {closer[0]} "
             "(the verifier may close; `closed_by` records it)"
@@ -588,16 +700,44 @@ def cmd_done(args) -> int:
         if (current.meta.get("closed") or "").strip():
             print(f"{item.id} is already closed ({current.meta['closed'].strip()})")
             return 0
-        updates = {"closed": checks.today()}
-        if closer:
-            updates["closed_by"] = closer[0]
+        updates = {"closed": checks.today(), "closed_by": closer[0]}
         artifacts.set_frontmatter_values(current.path, updates)
         _mention_evidence(current.path)
     print(f"done {item.id} ({checks.today()})")
     print(f"  AC {item.ac_done}/{item.ac_total}")
     print(f"  design: {item.design_status or '-'}")
-    if closer:
-        print(f"  closed by: {closer[0]}")
+    print(f"  closed by: {closer[0]}")
+    print(f"  {item.path.relative_to(profile.root)}")
+    return 0
+
+
+def cmd_drop(args) -> int:
+    """Retire an item that will not be delivered, without pretending it passed."""
+    profile = _load_profile(args)
+    item = artifacts.find_item(profile, args.id)
+    if artifacts.is_archived(item):
+        raise FlowError(
+            f"{item.id} is archived; run flow.py unarchive {item.id} before dropping it"
+        )
+    closed = (item.meta.get("closed") or "").strip()
+    if closed:
+        raise FlowError(
+            f"{item.id} is already closed ({closed}); use archive if it should leave the working set"
+        )
+    closer = identity.resolve(profile.root, args.owner)
+    reason = " ".join((args.reason or "").split())
+    with fsio.project_lock(profile.root):
+        current = artifacts.find_item(profile, args.id)
+        if (current.meta.get("closed") or "").strip():
+            print(f"{item.id} is already closed ({current.meta['closed'].strip()})")
+            return 0
+        updates = {"closed": "dropped", "closed_by": closer}
+        if reason:
+            updates["drop_reason"] = reason
+        artifacts.set_frontmatter_values(current.path, updates)
+    print(f"dropped {item.id}")
+    if reason:
+        print(f"  reason: {reason}")
     print(f"  {item.path.relative_to(profile.root)}")
     return 0
 
@@ -606,21 +746,43 @@ def cmd_claim(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
     owner = identity.resolve(profile.root, args.owner)
+    if artifacts.is_archived(item):
+        raise FlowError(
+            f"{item.id} is archived; run flow.py unarchive {item.id} before changing its owner"
+        )
     previous = (item.meta.get("owner") or "").strip()
     if identity.same(previous, owner):
         print(f"{item.id} is already owned by {previous or owner}")
         return 0
     closed = (item.meta.get("closed") or "").strip()
-    if previous and not closed and not args.takeover:
+    if closed:
+        raise FlowError(
+            f"{item.id} is already closed ({closed}); ownership of a closed item is history. "
+            "Create a new item instead of rewriting it."
+        )
+    if previous and not args.takeover:
         raise FlowError(
             f"{item.id} is owned by {previous} and is not closed ({item.status}); "
             "pass --takeover to reassign it, or ask the owner first. "
             "Ownership is a signal, not a lock: read the item before taking it."
         )
+    reason = " ".join((getattr(args, "reason", "") or "").split())
+    if previous and args.takeover and not reason:
+        raise FlowError(
+            f"taking over {item.id} from {previous} needs --reason \"...\"; "
+            "record why the handover happened"
+        )
     with fsio.project_lock(profile.root):
         current = artifacts.find_item(profile, args.id)
-        artifacts.set_frontmatter_value(current.path, "owner", owner)
+        updates = {"owner": owner}
+        if previous and args.takeover:
+            actor = identity.try_resolve(profile.root, None)
+            updates["takeover_by"] = actor[0] if actor else owner
+            updates["takeover_reason"] = reason
+        artifacts.set_frontmatter_values(current.path, updates)
     print(f"claimed {item.id}: {previous or 'unowned'} -> {owner}")
+    if reason:
+        print(f"  reason: {reason}")
     print("commit the change so teammates see the claim")
     return 0
 
@@ -652,12 +814,25 @@ def _commit_text(commits: list[git.Commit], since: str | None, total: int) -> st
 
 
 def _item_text(profile: profile_mod.Profile, commits: list[git.Commit]) -> str:
+    known = {
+        item.id
+        for item in artifacts.all_items(profile) + artifacts.archived_items(profile)
+        if item.id
+    }
     ids: list[str] = []
     for commit in commits:
         for item_id in profile.id_pattern.findall(f"{commit.subject}\n{commit.body}"):
             if item_id not in ids:
                 ids.append(item_id)
-    return "\n".join(f"- {item_id}" for item_id in ids) if ids else "None"
+    if not ids:
+        return "None"
+    lines = [f"- {item_id}" for item_id in ids if item_id in known]
+    lines.extend(
+        f"- (missing) {item_id} — referenced by a commit but no such item exists"
+        for item_id in ids
+        if item_id not in known
+    )
+    return "\n".join(lines)
 
 
 def _record_path(profile: profile_mod.Profile, channel: str, day: str, source: str) -> Path:
@@ -700,14 +875,33 @@ def cmd_release(args) -> int:
         branch = git.branch(profile.root)
         head = git.head(profile.root)
         previous = release.tip(profile, channel)
+        if args.since:
+            if not git.is_ancestor(profile.root, args.since, head):
+                raise FlowError(
+                    f"--since {args.since[:7]} is not an ancestor of HEAD; "
+                    "fetch/pull or pass a commit from this clone's history"
+                )
+            if (
+                previous
+                and args.since != previous.source
+                and git.is_ancestor(profile.root, previous.source, args.since)
+            ):
+                raise FlowError(
+                    f"--since {args.since[:7]} starts after the recorded tip "
+                    f"{previous.short}; record the range that follows the tip, "
+                    "or fix the bookkeeping commit first"
+                )
         since = args.since or (previous.source if previous else None)
         commits = git.commits(profile.root, since)
         debt = reconcile.collect(profile, channel, since)
+        range_paths = git.files_in_range(profile.root, since)
+        design_risk_touched = checks.risk_paths_touched(profile, range_paths)
         risk_touched = (
-            checks.risk_paths_touched(profile, git.files_in_range(profile.root, since))
-            if profile.release_confirm_risk_paths
-            else []
+            design_risk_touched if profile.release_confirm_risk_paths else []
         )
+        reconcile_risk = checks.paths_matching(range_paths, profile.risk_paths)
+        counts = git.upstream_counts(profile.root)
+        behind = counts[1] if counts else 0
     except git.GitError as exc:
         print(f"error: {exc}")
         return 2
@@ -722,6 +916,10 @@ def cmd_release(args) -> int:
     print(f"commits: {len(commits)}")
     print(f"gate: {profile.release_gate_level} (runs on --record)")
     print(f"record: {target.relative_to(profile.root)}")
+    if counts is None:
+        print("upstream: none configured; cannot prove this clone is current")
+    elif behind:
+        print(f"upstream: behind {behind} commit(s); pull before recording")
     if debt.dirty:
         print(f"dirty tree: {len(debt.dirty)} path(s); recording will be refused")
     if debt.blocking:
@@ -729,6 +927,18 @@ def cmd_release(args) -> int:
             f"debt: {len(debt.no_item) + len(debt.missing_item)} commit(s) without a "
             "work item; --note is required to record"
         )
+    if debt.bookkeeping:
+        print(f"bookkeeping: {len(debt.bookkeeping)} commit(s) ignored (records/archive only)")
+    if reconcile_risk:
+        only = [path for path in reconcile_risk if path not in design_risk_touched]
+        if only:
+            listed = ", ".join(only[:3]) + (
+                f" (+{len(only) - 3} more)" if len(only) > 3 else ""
+            )
+            print(
+                f"warn: [reconcile] risk paths touched but not in [design] risk_paths: {listed}; "
+                "review whether --confirm should cover them"
+            )
     if profile.release_confirm_risk_paths:
         if risk_touched:
             print(
@@ -748,6 +958,11 @@ def cmd_release(args) -> int:
     errors: list[str] = []
     if not args.rollback or not args.rollback.strip():
         errors.append("--rollback is required and must describe the rollback target and steps")
+    if behind:
+        errors.append(
+            f"this clone is behind its upstream by {behind} commit(s); "
+            "pull before recording a release"
+        )
     if debt.dirty:
         errors.append("working tree is dirty; commit or stash before recording a release")
     if not branch:
@@ -774,6 +989,7 @@ def cmd_release(args) -> int:
             "(do not fabricate history)"
         )
     confirm_text = (args.confirm or "").strip()
+    confirmed_by = (getattr(args, "confirmed_by", "") or "").strip() or by
     if risk_touched and not confirm_text:
         listed = ", ".join(risk_touched[:3]) + (
             f" (+{len(risk_touched) - 3} more)" if len(risk_touched) > 3 else ""
@@ -782,6 +998,9 @@ def cmd_release(args) -> int:
             f"this release touches a risk path ({listed}); "
             "pass --confirm \"<the human's words>\" to record who authorized it"
         )
+    if confirm_text and not risk_touched:
+        print("warn: --confirm was given but the range touches no [design] risk path; "
+              "the record will say Required: no")
     static_errors, static_warnings = checks.check_project(profile)
     if static_errors:
         errors.extend(f"check: {error}" for error in static_errors)
@@ -808,7 +1027,8 @@ def cmd_release(args) -> int:
     if risk_touched or confirm_text:
         authorization = (
             f"- Required: {'yes' if risk_touched else 'no'}\n"
-            f"- Confirmed by: {by if confirm_text else '-'}\n"
+            f"- Confirmed by: {confirmed_by if confirm_text else '-'}\n"
+            f"- Recorded by: {by}\n"
             f"- Note: {confirm_text or 'None'}"
         )
     else:
@@ -871,20 +1091,36 @@ def cmd_reconcile(args) -> int:
     try:
         previous = release.tip(profile, channel)
         since = args.since or (previous.source if previous else None)
+        if args.since and not git.has_commit(profile.root, args.since):
+            raise FlowError(
+                f"unknown commit {args.since[:7]}; it is not in this clone. "
+                "Fetch first, or pass a commit from this history."
+            )
         if since and not git.is_ancestor(profile.root, since, git.head(profile.root)):
             raise FlowError(
-                f"--since {since[:7]} is not an ancestor of HEAD; "
-                "pass a commit from this history"
+                f"the channel watermark {since[:7]} is not an ancestor of HEAD; "
+                "this clone is behind or on a different history. Fetch and pull."
             )
         debt = reconcile.collect(profile, channel, since)
-    except git.GitError as exc:
-        print(f"error: {exc}")
+    except (git.GitError, FlowError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     if args.json:
-        print(json.dumps(reconcile.as_dict(debt), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                reconcile.as_dict(debt, root=profile.root, verbose=args.verbose),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
     print(reconcile.render(debt, root=profile.root, verbose=args.verbose))
+    if debt.blocking:
+        print(
+            "\nnext: release --record needs --note naming the debt above; "
+            "commits that only touch records/archive are now ignored."
+        )
     return 0
 
 
@@ -928,10 +1164,14 @@ def cmd_extensions(args) -> int:
         print(f"{label}  [{info['source']}]  requires {info['requires']}")
         if info["description"]:
             print(f"  {info['description']}")
-        if info["commands"]:
+        if info.get("commands"):
             print(f"  commands: {', '.join(info['commands'])}")
-        for level, steps in info["gate"].items():
+        for level, steps in info.get("gate", {}).items():
             print(f"  gate {level} += {', '.join(steps)}")
+        if info.get("docs"):
+            print(f"  docs required += {', '.join(info['docs'])}")
+        if info.get("risk_paths"):
+            print(f"  reconcile risk paths += {', '.join(info['risk_paths'])}")
     return 0
 
 
@@ -982,6 +1222,13 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser.add_argument("--json", action="store_true")
     check_parser.set_defaults(func=cmd_check)
 
+    design_parser = subparsers.add_parser(
+        "design", help="create design.md from the skill template"
+    )
+    add_common(design_parser)
+    design_parser.add_argument("id")
+    design_parser.set_defaults(func=cmd_design)
+
     ready_parser = subparsers.add_parser("design-ready", help="validate a design and mark it ready")
     add_common(ready_parser)
     ready_parser.add_argument("id")
@@ -997,7 +1244,15 @@ def build_parser() -> argparse.ArgumentParser:
     done_parser = subparsers.add_parser("done", help="close a work item after AC evidence")
     add_common(done_parser)
     done_parser.add_argument("id")
+    done_parser.add_argument("--owner", help="who closes it (defaults to your identity)")
     done_parser.set_defaults(func=cmd_done)
+
+    drop_parser = subparsers.add_parser("drop", help="retire an item that will not be delivered")
+    add_common(drop_parser)
+    drop_parser.add_argument("id")
+    drop_parser.add_argument("--reason", help="why it was dropped")
+    drop_parser.add_argument("--owner", help="who dropped it (defaults to your identity)")
+    drop_parser.set_defaults(func=cmd_drop)
 
     claim_parser = subparsers.add_parser("claim", help="take ownership of a work item")
     add_common(claim_parser)
@@ -1006,7 +1261,10 @@ def build_parser() -> argparse.ArgumentParser:
     claim_parser.add_argument(
         "--takeover",
         action="store_true",
-        help="reassign an active item that another person owns",
+        help="reassign an active item that another person owns (needs --reason)",
+    )
+    claim_parser.add_argument(
+        "--reason", help="why the takeover happened; recorded in the item"
     )
     claim_parser.set_defaults(func=cmd_claim)
 
@@ -1027,6 +1285,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="the human's authorization, recorded when the range touches a risk path",
     )
     release_parser.add_argument("--note", help="accepted debt and other release notes")
+    release_parser.add_argument(
+        "--confirmed-by", help="who authorized the risk (defaults to the recorder)"
+    )
     release_parser.add_argument("--artifact", action="append", help="artefact reference; repeatable")
     release_parser.add_argument("--by", help="who records the release (defaults to your identity)")
     release_parser.add_argument("--since", help="override the watermark commit")

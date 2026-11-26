@@ -48,28 +48,39 @@ that teaches people to ignore the file.
   code. Another person's unfinished item does not block your batch; a release
   still validates everything. The strictest level's last PASS is recorded per
   clone and reported as stale when it ages out (advisory, never a block);
-  `gate --work` warns or refuses a risk-path change without a ready design,
-  according to `[design] risk_gate`.
+  `done` requires a PASS for the item at the strictest level in this clone; a
+  project-wide run does not name the item. `gate --work` warns or refuses a
+  risk-path change without a ready design, according to `[design] risk_gate`.
 
 ## 5. Implementation and verification are different contexts
 
 - The verifier checks AC black-box, not the implementer's rationale.
-- Evidence is written to `test-report.md`; a claim is not evidence.
+- Evidence is written to one cumulative `test-report.md` per item; a claim is
+  not evidence. A later batch appends its rows or another `## Evidence` block;
+  it never overwrites an earlier batch's evidence.
 - Evidence is one row per AC with the command and its output. A row with an
-  empty cell, a placeholder, or no row at all is not evidence.
+  empty cell, a TODO-style placeholder, or no row at all is not evidence.
+  Angle-bracket text in a real command or output (`<skill>`, `<nil>`, `<br>`)
+  is evidence, not a placeholder.
 - When the harness has no subagents, the weaker mode is declared, not hidden.
-- **Enforced**: `done` refuses a designed item without `test-report.md`, without
-  `Verdict: PASS`, or with an AC that has no evidence row. While the item is
-  open, `check` reports a partial or failing report as a warning so iterating
-  is not blocked. Whether the evidence is *sufficient* is still human.
+  For a one-shot item with no `implementation.md`, declare it in `## Notes`.
+- **Enforced**: `done` refuses any item without `test-report.md`, without
+  `Verdict: PASS`, with an AC that has no evidence row, without a recorded
+  full-level gate PASS, or without an identity. While the item is open, `check`
+  reports a partial or failing report as a warning so iterating is not blocked.
+  Whether the evidence is *sufficient* is still human.
 
 ## 6. Every batch is planned before the first one
 
-- The design lists all `B1..Bn`; no "this round" or "stage 1".
+- The design lists all `B1..Bn` in order, with no gaps; no "this round" or "stage 1".
 - Every AC appears in at least one batch.
+- A dependency names an earlier batch; no forward edge, cycle, or self-dependency.
 - Contracts and data model first; backend before frontend.
 - After each batch the main branch builds and passes the gate.
-- **Enforced**: `design-ready` validates batch ids, AC coverage, and dependencies.
+- **Enforced**: `design-ready` validates contiguous ordered batch ids, AC
+  coverage, dependency existence and direction, and cycles. `handoff` refuses a
+  done batch, a batch whose dependency is not done, and names a blocked batch
+  instead of dispatching it.
 
 ## 7. Work is never half-done on main
 
@@ -84,12 +95,17 @@ that teaches people to ignore the file.
   gate/smoke results, the configured artefacts, and a rollback target.
 - Records form one chain per channel; the watermark is the ancestry tip of that
   chain, not a filename or a local clock.
-- Commits without work items are recorded as adhoc debt; they are not blocked.
+- Commits that only add records or archive an item are bookkeeping, not debt.
+  Other commits without work items are recorded as adhoc debt; they are not
+  blocked, but they cannot be skipped with `--since`.
+- `## Work items` names only existing (active or archived) items; an unknown id
+  is labelled `(missing)`.
 - **Enforced**: `release --record` runs `check` and the configured gate level,
-  refuses a dirty tree, a non-mainline branch, an empty rollback, undocumented
-  debt, and a source that does not descend from the recorded tip; an unreadable
-  or divergent record stops the release instead of being skipped; `reconcile`
-  reports the debt and exits 0 when it can compute the range.
+  refuses a dirty tree, a non-mainline branch, a behind clone, an empty rollback,
+  undocumented debt, and a source that does not descend from the recorded tip;
+  an unreadable or divergent record stops the release instead of being skipped;
+  `reconcile` reports the debt and exits 0 when it can compute the range.
+  Divergent records are repaired with a revert commit, never by editing one.
 
 ## 9. One authority per fact
 
@@ -106,13 +122,19 @@ that teaches people to ignore the file.
   item directory is mentioned by its `item.md`.
 - A decision is superseded, never rewritten: the status is an enum, a superseded
   decision names its successor, the successor exists, and the chain terminates.
+  The shipped decision template uses `none` for empty pointers and passes its
+  own checker.
+- The archive index is the record store's entry point: every archived item has
+  one row, and every row resolves to an archived item.
 - A silence is a record, not a switch: an exception names one check, one path, a
   reason, and an expiry. An expired exception suppresses nothing and is an error.
 - **Enforced**: `check` reports missing required documents, unresolved relative
   links, unreachable directory indexes, directories with no index, unindexed
-  files, unmentioned item artifacts, duplicate headings in a release record,
-  version/port/date/count pins in entry documents, broken decision chains, and
-  expired or unused exemptions. Whether the prose is true is still human.
+  files, unmentioned item artifacts, archive-index drift, duplicate headings in
+  a release record, version/port/date/count pins in entry documents, broken
+  decision chains, and expired or unused exemptions. Record stores (work items,
+  release records, `_archive/`) are excluded from the link index. Whether the
+  prose is true is still human.
 
 ## 10. Extensions may add, never remove
 
@@ -152,7 +174,9 @@ that teaches people to ignore the file.
   two items.
 - Every item records its owner; the owner comes from an explicit identity, never
   from a machine's `user.name`. Reassigning an open item that another person
-  owns requires an explicit takeover, and closing an item records who closed it.
+  owns requires an explicit `--takeover --reason "..."`, and closing an item
+  requires an identity and records who closed it. A closed item cannot be
+  claimed, and an archived item is read-only until unarchived.
 - Shared facts that must agree across clones — release order, the watermark —
   come from the commit graph, never from a local clock or directory order. The
   id's time code is a label and a sort key, not a watermark.
@@ -160,9 +184,9 @@ that teaches people to ignore the file.
   stale, or forked release record.
 - **Enforced**: `new` allocates `{time}` and increments it on collision;
   `find_item` refuses an ambiguous id and lists the candidates; `claim` records
-  ownership and refuses another person's open item without `--takeover`; `done`
-  writes `closed_by`; `release`/`reconcile` order records by ancestry and stop
-  on a broken chain.
+  ownership and refuses another person's open item without
+  `--takeover --reason`; `done` requires an identity and writes `closed_by`;
+  `release`/`reconcile` order records by ancestry and stop on a broken chain.
 
 ## Compatibility
 

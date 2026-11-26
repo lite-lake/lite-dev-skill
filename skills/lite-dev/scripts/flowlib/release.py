@@ -126,24 +126,29 @@ def chain(profile: Profile, channel: str) -> list[ReleaseRecord]:
             if record.previous != "none":
                 raise FlowError(
                     f"{record.path.name}: previous {record.previous[:7]} does not follow "
-                    "nothing; release records form one chain. Write a new record "
-                    "instead of editing an old one."
+                    "nothing; release records form one chain. If this record is the "
+                    "half that was recorded from a stale clone, revert the commit that "
+                    "added it (a new commit, not an edit), then record again from the "
+                    "true tip."
                 )
             continue
         before = ordered[index - 1]
         if not git.is_ancestor(profile.root, before.source, record.source):
             raise FlowError(
                 f"channel {channel!r} has divergent release records: "
-                f"{before.path.name} ({before.short}) and "
-                f"{record.path.name} ({record.short}) are not on one history. "
-                "A rewrite or a release from a branch happened; record again from "
-                "the true mainline tip."
+                f"{before.path.name} ({before.short}, by {before.by or '-'}) and "
+                f"{record.path.name} ({record.short}, by {record.by or '-'}) are not "
+                "on one history. A rewrite or a release from a stale clone happened. "
+                "Revert the record that does not belong to the true mainline (a new "
+                "commit, not an edit), then record again from the true tip."
             )
         if record.previous != before.source:
             raise FlowError(
                 f"{record.path.name}: previous {record.previous[:7]} does not follow "
-                f"{before.path.name}; release records form one chain. Write a new "
-                "record instead of editing an old one."
+                f"{before.path.name} ({before.short}); release records form one chain. "
+                "If {record.path.name} was recorded from a stale clone, revert the "
+                "commit that added it (a new commit, not an edit), then record again "
+                "from the true tip."
             )
     return ordered
 

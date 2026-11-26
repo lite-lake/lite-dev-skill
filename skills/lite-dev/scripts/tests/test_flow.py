@@ -190,6 +190,9 @@ class BaseCase(unittest.TestCase):
         self._write(self.profile_path, PROFILE)
         for relative in ("README.md", "AGENTS.md", "docs/README.md"):
             self._write(self.root / relative, "# doc\n")
+        # The gate ledger lives in .git; a repo (even without a commit) is what
+        # makes a gate PASS available to `done`.
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
         self.profile = profile_mod.load(self.profile_path)
         self._env = mock.patch.dict(
             os.environ,
@@ -291,6 +294,15 @@ class ProfileTest(BaseCase):
         self._write(self.profile_path, PROFILE.replace('test = "echo ok"', 'test = ""'))
         with self.assertRaises(profile_mod.ProfileError):
             profile_mod.load(self.profile_path)
+
+    def test_unknown_gate_level_is_rejected(self) -> None:
+        self._write(
+            self.profile_path,
+            PROFILE.replace('l1 = ["test"]', 'l1 = ["test"]\nl4 = ["test"]'),
+        )
+        with self.assertRaises(profile_mod.ProfileError) as caught:
+            profile_mod.load(self.profile_path)
+        self.assertIn("unknown key", str(caught.exception))
 
     def test_id_format_requires_a_time_token(self) -> None:
         self._write(
@@ -583,6 +595,44 @@ class StatusTest(BaseCase):
         self.assertEqual(code, 0, output)
         self.assertIn("stale: none older than 10000 days", output)
 
+    def test_status_does_not_warn_about_the_gate_before_an_item_is_ready(self) -> None:
+        self.make_item()
+        code, output = self.run_flow("status")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("has no PASS recorded", output)
+
+        self.write_design()
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        code, output = self.run_flow("status")
+        self.assertIn("has no PASS recorded", output)
+
+    def test_status_shows_required_and_invalid_designs(self) -> None:
+        self._write(
+            self.profile_path,
+            PROFILE.replace('required_for = ["L"]', 'required_for = ["L", "M"]'),
+        )
+        self.make_item(item_id="20260101-REQ-aaaaaa", size="M")
+        code, output = self.run_flow("status")
+        self.assertEqual(code, 0, output)
+        self.assertIn("required", output)
+
+        item = self.make_item(item_id="20260101-REQ-bbbbbb", size="M")
+        self.write_design(
+            text=DESIGN.format(ac_cell="AC01", item_id=item.id), item_id=item.id
+        )
+        design = item.directory / "design.md"
+        design.write_text(
+            design.read_text(encoding="utf-8").replace("status: draft", "status: ready"),
+            encoding="utf-8",
+        )
+        design.write_text(
+            design.read_text(encoding="utf-8").replace("## Handoff", "## 交接摘要"),
+            encoding="utf-8",
+        )
+        code, output = self.run_flow("status")
+        self.assertIn("ready!", output)
+        self.assertIn("marked ready but invalid", output)
+
     def test_stale_json_carries_the_report(self) -> None:
         item = self.make_item(size="S")
         self._git("init", "-q")
@@ -657,6 +707,76 @@ class DesignTest(BaseCase):
         self.assertEqual(code, 0, output)
         self.assertEqual(artifacts.find_item(self.profile, ITEM_ID).design_status, "ready")
 
+    def test_translated_heading_is_named_in_the_error(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "## Handoff", "## 交接摘要"
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("the parsed heading must stay '## Handoff'" in error for error in errors),
+            errors,
+        )
+
+    def test_design_ready_refuses_a_wrong_item_frontmatter(self) -> None:
+        self.make_item()
+        self.write_design(text=DESIGN.format(ac_cell="AC01", item_id="WRONG-ID"))
+        code, output = self.run_flow("design-ready", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("frontmatter 'item'", output)
+
+    def test_forward_batch_dependency_is_refused(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | . | AC01 | B2 |\n| B2 | two | . | AC01 | — |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("not an earlier batch" in error for error in errors), errors
+        )
+
+    def test_batch_cycle_is_refused(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | . | AC01 | B2 |\n| B2 | two | . | AC01 | B1 |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(any("not an earlier batch" in error for error in errors), errors)
+
+    def test_non_contiguous_batches_are_refused(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | . | AC01 | — |\n| B3 | three | . | AC01 | B1 |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(any("B1..Bn in order" in error for error in errors), errors)
+
+
+class DesignCommandTest(BaseCase):
+    def test_design_scaffolds_from_the_template(self) -> None:
+        item = self.make_item(size="L")
+        code, output = self.run_flow("design", item.id)
+        self.assertEqual(code, 0, output)
+        text = (item.directory / "design.md").read_text(encoding="utf-8")
+        self.assertIn(f"item: {item.id}", text)
+        self.assertIn("status: draft", text)
+        again = self.run_flow("design", item.id)
+        self.assertEqual(again[0], 2)
+        self.assertIn("already has design.md", again[1])
+
+    def test_design_refuses_an_unclarified_item(self) -> None:
+        item = self.make_item(size="L", clarify="pending")
+        code, output = self.run_flow("design", item.id)
+        self.assertEqual(code, 2)
+        self.assertIn("not clarified", output)
+
 
 class GateTest(BaseCase):
     def test_gate_passes(self) -> None:
@@ -675,6 +795,16 @@ class GateTest(BaseCase):
 
     def test_gate_requires_ready_design_for_l(self) -> None:
         self.make_item(ac="- [x] AC01 works")
+        code, output = self.run_flow("gate", "--level", "l1", "--work", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("needs a ready design", output)
+
+    def test_gate_requires_a_design_for_m_when_the_profile_says_so(self) -> None:
+        self._write(
+            self.profile_path,
+            PROFILE.replace('required_for = ["L"]', 'required_for = ["L", "M"]'),
+        )
+        self.make_item(ac="- [x] AC01 works", size="M")
         code, output = self.run_flow("gate", "--level", "l1", "--work", ITEM_ID)
         self.assertEqual(code, 1)
         self.assertIn("needs a ready design", output)
@@ -699,6 +829,8 @@ class DoneTest(BaseCase):
         code, output = self.run_flow("design-ready", ITEM_ID)
         self.assertEqual(code, 0, output)
         self.write_report()
+        gate = self.run_flow("gate", "--level", "l3", "--work", ITEM_ID)
+        self.assertEqual(gate[0], 0, gate[1])
         code, output = self.run_flow("done", ITEM_ID)
         self.assertEqual(code, 0, output)
         item = artifacts.find_item(self.profile, ITEM_ID)
@@ -755,8 +887,63 @@ class DoneTest(BaseCase):
         self.assertEqual(code, 0, output)
         self.assertIn("verdict is 'FAIL'", output)
 
+    def test_done_requires_a_report_for_an_s_item(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        gate = self.run_flow("gate", "--level", "l3", "--work", item.id)
+        self.assertEqual(gate[0], 0, gate[1])
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 1)
+        self.assertIn("requires test-report.md", output)
+
+    def test_angle_brackets_are_evidence_not_placeholders(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        self.write_report(
+            item_id=item.id,
+            rows="| AC01 | python3 <skill>/scripts/flow.py status | <ok> |",
+        )
+        gate = self.run_flow("gate", "--level", "l3", "--work", item.id)
+        self.assertEqual(gate[0], 0, gate[1])
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 0, output)
+
+    def test_done_requires_a_recorded_gate_pass(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        self.write_report(item_id=item.id)
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 1)
+        self.assertIn("no l3 PASS recorded", output)
+        gate = self.run_flow("gate", "--level", "l3", "--work", item.id)
+        self.assertEqual(gate[0], 0, gate[1])
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 0, output)
+
+    def test_done_refuses_a_draft_design(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "- Confirmed: yes", "- Confirmed: no"
+        )
+        self.write_design(text=text)
+        self.write_report(item_id=item.id)
+        gate = self.run_flow("gate", "--level", "l3", "--work", item.id)
+        self.assertEqual(gate[0], 0, gate[1])
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 1)
+        self.assertIn("not ready", output)
+
+    def test_done_refuses_an_archived_item(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        archived = self.run_flow(
+            "archive", item.id, "--force", "--reason", "abandoned probe"
+        )
+        self.assertEqual(archived[0], 0, archived[1])
+        code, output = self.run_flow("done", item.id)
+        self.assertEqual(code, 2)
+        self.assertIn("archived", output)
+
     def test_done_writes_lf_endings(self) -> None:
         item = self.make_item(ac="- [x] AC01 works", size="S")
+        self.write_report(item_id=item.id)
+        self.assertEqual(self.run_flow("gate", "--level", "l3", "--work", item.id)[0], 0)
         code, output = self.run_flow("done", item.id)
         self.assertEqual(code, 0, output)
         data = item.path.read_bytes()
@@ -774,10 +961,21 @@ class IdentityTest(BaseCase):
 
     def test_claim_reassigns_with_takeover(self) -> None:
         item = self.make_item()
-        code, output = self.run_flow("claim", item.id, "--owner", "bob", "--takeover")
+        code, output = self.run_flow(
+            "claim", item.id, "--owner", "bob", "--takeover", "--reason", "on-call"
+        )
         self.assertEqual(code, 0, output)
         self.assertIn("alice -> bob", output)
-        self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "bob")
+        claimed = artifacts.find_item(self.profile, item.id)
+        self.assertEqual(claimed.meta["owner"], "bob")
+        self.assertEqual(claimed.meta["takeover_reason"], "on-call")
+
+    def test_takeover_without_a_reason_is_refused(self) -> None:
+        item = self.make_item()
+        code, output = self.run_flow("claim", item.id, "--owner", "bob", "--takeover")
+        self.assertEqual(code, 2)
+        self.assertIn("--reason", output)
+        self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "alice")
 
     def test_claim_of_an_unowned_item_needs_no_takeover(self) -> None:
         item = self.make_item(owner="")
@@ -785,11 +983,12 @@ class IdentityTest(BaseCase):
         self.assertEqual(code, 0, output)
         self.assertIn("unowned -> bob", output)
 
-    def test_claim_of_a_closed_item_needs_no_takeover(self) -> None:
+    def test_claim_of_a_closed_item_is_refused(self) -> None:
         item = self.make_item(owner="alice", closed="2026-01-02", size="S")
         code, output = self.run_flow("claim", item.id, "--owner", "bob")
-        self.assertEqual(code, 0, output)
-        self.assertIn("alice -> bob", output)
+        self.assertEqual(code, 2)
+        self.assertIn("already closed", output)
+        self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "alice")
 
     def test_whoami_reports_the_source(self) -> None:
         code, output = self.run_flow("whoami")
@@ -806,6 +1005,8 @@ class IdentityTest(BaseCase):
 
     def test_done_records_who_closed_and_warns_on_a_different_owner(self) -> None:
         item = self.make_item(ac="- [x] AC01 works", size="S", owner="alice")
+        self.write_report(item_id=item.id)
+        self.assertEqual(self.run_flow("gate", "--level", "l3", "--work", item.id)[0], 0)
         with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": "bob"}):
             code, output = self.run_flow("done", item.id)
         self.assertEqual(code, 0, output)
@@ -814,12 +1015,25 @@ class IdentityTest(BaseCase):
         self.assertEqual(closed.meta["closed_by"], "bob")
         self.assertTrue(closed.meta["closed"])
 
-    def test_done_works_without_an_identity_and_writes_no_closer(self) -> None:
+    def test_done_accepts_an_explicit_owner(self) -> None:
         item = self.make_item(ac="- [x] AC01 works", size="S")
+        self.write_report(item_id=item.id)
+        self.assertEqual(self.run_flow("gate", "--level", "l3", "--work", item.id)[0], 0)
+        code, output = self.run_flow("done", item.id, "--owner", "bob")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(
+            artifacts.find_item(self.profile, item.id).meta["closed_by"], "bob"
+        )
+
+    def test_done_without_an_identity_is_refused(self) -> None:
+        item = self.make_item(ac="- [x] AC01 works", size="S")
+        self.write_report(item_id=item.id)
+        self.assertEqual(self.run_flow("gate", "--level", "l3", "--work", item.id)[0], 0)
         with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": ""}):
             code, output = self.run_flow("done", item.id)
-        self.assertEqual(code, 0, output)
-        self.assertNotIn("closed_by", artifacts.read_text(item.path))
+        self.assertEqual(code, 2)
+        self.assertIn("no identity", output)
+        self.assertNotIn("closed_by: bob", artifacts.read_text(item.path))
 
     def test_status_mine_filters_by_identity(self) -> None:
         self.make_item(item_id="20260101-REQ-aaaaaa", owner="alice")
@@ -833,6 +1047,27 @@ class IdentityTest(BaseCase):
         self.assertIn("20260101-REQ-bbbbbb", output)
 
 
+class DropTest(BaseCase):
+    def test_drop_marks_dropped_and_records_the_reason(self) -> None:
+        item = self.make_item(ac="- [ ] AC01 never delivered", size="S")
+        code, output = self.run_flow("drop", item.id, "--reason", "scope cut")
+        self.assertEqual(code, 0, output)
+        dropped = artifacts.find_item(self.profile, item.id)
+        self.assertEqual(dropped.status, "dropped")
+        self.assertEqual(dropped.meta["closed"], "dropped")
+        self.assertEqual(dropped.meta["closed_by"], "alice")
+        self.assertEqual(dropped.meta["drop_reason"], "scope cut")
+        check = self.run_flow("check")
+        self.assertEqual(check[0], 0, check[1])
+        self.assertNotIn("closed but AC", check[1])
+
+    def test_drop_refuses_a_closed_item(self) -> None:
+        item = self.make_item(size="S", closed="2026-01-02")
+        code, output = self.run_flow("drop", item.id)
+        self.assertEqual(code, 2)
+        self.assertIn("already closed", output)
+
+
 class TargetingTest(BaseCase):
     def test_ambiguous_prefix_is_an_error(self) -> None:
         self.make_item(item_id="20260101-REQ-aaaaaa")
@@ -844,8 +1079,22 @@ class TargetingTest(BaseCase):
         self.assertIn("20260101-REQ-aaaaab", output)
 
     def test_unique_prefix_resolves(self) -> None:
-        self.make_item(item_id="20260101-REQ-aaaaaa", ac="- [x] AC01 works", size="S")
+        item = self.make_item(
+            item_id="20260101-REQ-aaaaaa", ac="- [x] AC01 works", size="S"
+        )
+        self.write_report(item_id=item.id)
+        self.assertEqual(self.run_flow("gate", "--level", "l3", "--work", item.id)[0], 0)
         code, output = self.run_flow("done", "20260101-REQ-aaaa")
+        self.assertEqual(code, 0, output)
+
+    def test_gate_prefix_records_the_full_id_for_done(self) -> None:
+        item = self.make_item(
+            item_id="20260101-REQ-aaaaaa", ac="- [x] AC01 works", size="S"
+        )
+        self.write_report(item_id=item.id)
+        gate = self.run_flow("gate", "--level", "l3", "--work", "20260101-REQ-aaaa")
+        self.assertEqual(gate[0], 0, gate[1])
+        code, output = self.run_flow("done", item.id)
         self.assertEqual(code, 0, output)
 
     def test_id_must_match_the_format(self) -> None:

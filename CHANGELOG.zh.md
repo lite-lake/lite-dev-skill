@@ -2,6 +2,53 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.3.7 — 2026-11-26
+
+协议现在和工具一致：M 是「单会话但有设计」，每个条目收尾都要证据和记录在案的门禁，
+批次构成有序图，流程不再把自己的发布/归档提交当成欠账。
+
+### 新增
+
+- `flow.py design <ID>` 从模板生成 `design.md`；`flow.py drop <ID> [--reason]`
+  进入 `dropped` 状态，不再需要手写 frontmatter。
+- `done --owner`、`claim --reason`、`release --confirmed-by` 让归属和授权显式。
+  `claim --takeover` 现在必须有理由，并记录 `takeover_by`/`takeover_reason`。
+- `test-report.md` 改为累计：解析器读取每个 `## Evidence` 块，后一批追加而不是覆盖
+  前一批证据。
+- 校验批次图：`B1..Bn` 有序无缺口，依赖只能指向更早批次，拒绝环和自依赖。
+  `handoff` 把 blocked 批次标为阻塞（不再当成 pending），拒绝派发已 done 的批次，
+  不会把 draft 设计说成已确认。
+- `status` 在需要设计时显示 `required`；ready 设计失效时显示 `ready!` 并给出警告。
+- 发布记账与欠账分离；归档 item id 仍算已知；`## Work items` 把未知 id 标为
+  `(missing)`；提交挂了 item id 的 risk path 仍会被报告。`release --record` 拒绝
+  落后于上游的克隆，以及起点晚于已记录 tip 的 `--since`。
+- `check` 校验归档索引，发布记录不再被要求链接进索引，重复 id 只报一次。决策指针
+  接受 `none`；随附模板能通过自己的检查。
+- `extensions` 打印必需文档和 reconcile 风险路径。`security-scan` 扫描索引加未跟踪
+  且未忽略的文件；`go-service` 把构建输出写到临时目录。
+- 导入前检查 Python 3.11+，给出可行动的错误，而不是 `tomllib` 的原始 traceback。
+
+### 变更
+
+- `done` 现在对**所有**条目要求 `test-report.md`、每个 AC 一行证据、该条目在最高
+  门禁级别的 PASS 记录，以及身份，不再只针对设计项。
+- 归档条目只读：`done`、`claim`、`drop`、`design-ready` 在 `unarchive` 前拒绝；
+  `claim` 拒绝已关闭条目。
+- `archive --force` 必须有 `--reason`。`[gate]` 拒绝 `l4` 这类未知级别，不再静默丢弃。
+- `status` 在条目进入 ready/done 前不再提示缺少 full level PASS；更便宜的门禁仍会提示。
+- 证据单元格里的 `<skill>`、`<nil>`、`<br>` 是证据，不是占位符。翻译设计标题会得到
+  明确错误，指出必须保留的英文标题。
+- `profile.template.toml` 要求 `>=0.3.7,<0.4`，占位测试命令在配置前会失败。
+
+### 破坏性变更
+
+- 升级 skill 的项目必须同步升级 profile：`done`、`claim`、归档条目命令、
+  `archive --force` 和更严格的 `[gate]` 校验都是新的拒绝。
+- `go-service` 的 `go_build` 改为写临时目录；`security-scan` 也扫描未跟踪文件。
+  依赖旧范围的项目应在 l3 重跑两者。
+- M 明确为「单会话但仍需设计」（当 `[design] required_for` 含 `M`）；minimal 示例
+  已改用该默认值。
+
 ## 0.3.6 — 2026-11-26
 
 证据、可达性和「有边界的沉默」变成检查：`done` 拒绝没有通过测试报告的设计项，

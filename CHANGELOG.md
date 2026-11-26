@@ -2,6 +2,68 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.7 — 2026-11-26
+
+The protocol now says what the tool does: M is a one-session design, every item
+closes with evidence and a recorded gate, batches form an ordered graph, and the
+flow no longer treats its own release/archive commits as debt.
+
+### Added
+
+- `flow.py design <ID>` scaffolds `design.md` from the template; `flow.py drop
+  <ID> [--reason]` reaches the `dropped` state without hand-editing frontmatter.
+- `done --owner`, `claim --reason`, and `release --confirmed-by` make ownership
+  and authorization explicit. `claim --takeover` now requires a reason and
+  records `takeover_by`/`takeover_reason`.
+- `test-report.md` is cumulative: the parser reads every `## Evidence` block, so
+  a later batch appends instead of overwriting earlier evidence.
+- Batch graphs are validated: `B1..Bn` in order with no gaps, dependencies only
+  on earlier batches, no cycles or self-dependencies. `handoff` names a blocked
+  batch (instead of calling it pending), refuses a done batch, and does not
+  announce a draft design as confirmed.
+- `status` shows `required` when a design is required and `ready!` plus a warning
+  when a ready design no longer validates.
+- Release bookkeeping is separated from debt, archived item ids are known,
+  `## Work items` labels unknown ids `(missing)`, and risky paths are reported
+  even when the commit names an item. `release --record` refuses a clone behind
+  its upstream and a `--since` that starts after the recorded tip.
+- `check` validates the archive index, excludes release records from the index
+  links, and reports a duplicate id once. Decision pointers accept `none`; the
+  shipped template passes its own checker.
+- `extensions` prints required docs and reconcile risk paths. `security-scan`
+  covers the index plus untracked non-ignored files; `go-service` writes build
+  output to a temp directory.
+- Python 3.11+ is checked before imports, with an actionable error instead of a
+  raw `tomllib` traceback.
+
+### Changed
+
+- `done` now requires `test-report.md`, one evidence row per AC, a recorded PASS
+  for the item at the strictest gate level, and an identity for **every** item,
+  not only designed ones.
+- Archived items are read-only: `done`, `claim`, `drop`, and `design-ready`
+  refuse them until `unarchive`. `claim` refuses a closed item.
+- `archive --force` requires `--reason`. `[gate]` rejects an unknown level such as
+  `l4` instead of silently dropping it.
+- `status` stays quiet about a missing full-level PASS until an item is
+  ready/done; a cheaper `gate` still reports it.
+- Evidence cells containing `<skill>`, `<nil>`, or `<br>` are evidence, not
+  placeholders. Translated design headings get a specific error naming the
+  required English heading.
+- `profile.template.toml` requires `>=0.3.7,<0.4` and its placeholder test command
+  now fails until configured.
+
+### Breaking
+
+- A project upgrading its skill must upgrade its profile in the same change:
+  `done`, `claim`, archived-item commands, `archive --force`, and the stricter
+  `[gate]` validation are new refusals.
+- `go-service`'s `go_build` now writes to a temp directory instead of the repo
+  root; `security-scan` also scans untracked files. A project that relied on the
+  old scope should rerun both at l3.
+- M is documented as a one-session change that still requires a design when
+  `[design] required_for` includes `M`; the minimal example now uses that default.
+
 ## 0.3.6 — 2026-11-26
 
 Evidence, reachability, and bounded silence become checks: `done` refuses a
