@@ -1,0 +1,39 @@
+[project]
+name = "minimal"
+language = "en"
+docs_dir = "docs"
+work_dir = "docs/work"
+
+[id]
+format = "{date}-{type}-{seq:02d}"
+owner = ""
+
+[gate]
+l1 = ["test"]
+l2 = ["test", "lint"]
+l3 = ["test", "lint", "e2e"]
+
+[design]
+required_for = ["L"]
+require_confirmed = true
+
+[commands]
+test = "python3 -m unittest discover -s tests -q"
+lint = "python3 -m compileall -q src tests"
+unit = "python3 -m unittest discover -s tests -q"
+e2e = "python3 -m unittest discover -s tests -q"
+
+[docs]
+required = ["README.md", "AGENTS.md", "docs/README.md"]
+
+[release]
+channels = []
+dir = "docs/releases"
+gate_level = "l3"
+
+[reconcile]
+risk_paths = []
+
+[extensions]
+enabled = []
+dir = "docs/flow/extensions"

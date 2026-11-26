@@ -1,0 +1,61 @@
+# lite-dev profile — the only file that holds project-specific facts.
+#
+# Copy to docs/flow/profile.toml and edit. Artifact headings are a parsing
+# contract: keep the templates as they are, write prose in any language.
+# Use forward slashes in paths: a TOML basic string treats "\" as an escape.
+
+[project]
+name = "my-project"
+language = "en"            # en | zh — language for prose, not for headings
+docs_dir = "docs"
+work_dir = "docs/work"
+
+[id]
+# {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {seq} -> 01
+# {owner} is optional; if used, [id] owner must be set.
+format = "{date}-{type}-{seq:02d}"
+owner = ""
+
+[gate]
+# Ordered command names per level. l1 = fast iteration, l2 = batch
+# acceptance, l3 = full / commit. Levels you omit are unavailable.
+# Invariant: l1 must stay cheap enough to run on every batch.
+l1 = ["test"]
+l2 = ["test"]
+l3 = ["test"]
+
+[design]
+# Sizes that require design.md before implementation.
+required_for = ["L", "M"]
+# The human must confirm the plan before design-ready passes.
+require_confirmed = true
+
+[commands]
+# Any shell command run from the project root. This file is executable input:
+# treat it as trusted project configuration, not as data from an untrusted source.
+test = "echo 'replace me with your real test command'"
+# lint = "your linter"
+# unit = "your unit test command"
+# e2e = "your end-to-end command"
+
+[docs]
+# These must exist; check reports missing ones as errors.
+required = ["README.md", "AGENTS.md", "docs/README.md"]
+
+[release]
+# Channels you record releases for. Empty means `flow.py release` is unavailable.
+# `gate_level` must exist in [gate]; --record runs it and refuses on failure.
+channels = []
+dir = "docs/releases"
+gate_level = "l3"
+
+[reconcile]
+# Commit paths that deserve attention when a commit has no work item.
+risk_paths = []
+
+[extensions]
+# Declarative add-ons. Resolved from `dir` first, then from the skill's
+# extensions/. An extension may add commands, gate steps, docs and risk paths;
+# it may not replace or remove anything.
+enabled = []
+dir = "docs/flow/extensions"

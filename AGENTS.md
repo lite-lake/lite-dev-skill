@@ -1,0 +1,43 @@
+# AGENTS.md — working on lite-dev-skill
+
+This repository is the distribution for the `lite-dev` skill. The skill name and
+trigger stay `lite-dev`; the repository is `lite-dev-skill`.
+
+Read `skills/lite-dev/references/invariants.md` first. It outranks this file and
+every template.
+
+## Rules
+
+1. **No project facts inside the skill.** `skills/lite-dev/` must not contain a
+   repository name, build command, branch model, or service name. Those belong in
+   a project's `docs/flow/profile.toml`. If you need an example, use `.` and a
+   generic command.
+2. **Headings are a contract.** `## AC`, `## Batches`, `## Handoff`, etc. are
+   parsed by `scripts/flowlib`. Renaming one is a breaking change.
+3. **Keep `SKILL.md` small.** It is always loaded. Put depth in `references/` and
+   add a row to the routing table instead of a new section.
+4. **The deterministic layer is tested.** Run:
+
+   ```bash
+   python3 -m unittest discover -s skills/lite-dev/scripts/tests -v
+   ```
+
+   New parsing or derivation logic needs a test. The acceptance test runs the
+   real CLI against a copy of `examples/minimal`.
+5. **Extensions may add, never remove.** Do not add an escape hatch that waives
+   an invariant in `spec/invariants.md`.
+6. **Profile commands are executable input.** Never interpolate untrusted content
+   into a command or a generated profile.
+
+## Before you finish
+
+- Run the unit tests and the `examples/minimal` acceptance:
+  `new → check → status → design-ready → gate → done`.
+- Update `CHANGELOG.md`; note breaking changes explicitly.
+- If you changed an invariant, bump the major version and say so in the changelog.
+
+## Style
+
+- Python standard library only. No dependencies.
+- Errors are actionable: say what to fix, not only what failed.
+- English for code, headings, and tool output; prose files may be translated.

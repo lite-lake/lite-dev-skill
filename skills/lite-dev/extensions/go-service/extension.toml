@@ -1,0 +1,17 @@
+name = "go-service"
+version = "1.0.0"
+description = "Go service: build, vet, and test with the standard toolchain."
+requires = ">=0.2,<0.3"
+
+[commands]
+go_build = "go build ./..."
+go_test = "go test ./..."
+go_vet = "go vet ./..."
+
+[gate]
+l1 = ["go_build"]
+l2 = ["go_test"]
+l3 = ["go_vet"]
+
+[reconcile]
+risk_paths = ["migrations/", "internal/auth/"]
