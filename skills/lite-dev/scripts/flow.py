@@ -77,9 +77,17 @@ def _load_profile(args) -> profile_mod.Profile:
 
 
 def _slugify(title: str) -> str:
-    cleaned = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", title.strip(), flags=re.UNICODE)
+    """A directory slug that follows the title's script.
+
+    Chinese titles keep their characters and cap at 30, which is 60 columns;
+    everything else keeps the dash-joined form and the 32-character cap.
+    """
+    text = title.strip()
+    wide = bool(artifacts.CJK_RE.search(text))
+    limit = artifacts.SLUG_WIDE_MAX if wide else artifacts.SLUG_ASCII_MAX
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", text, flags=re.UNICODE)
     cleaned = re.sub(r"-+", "-", cleaned).strip("-")
-    return cleaned[:32].rstrip("-")
+    return cleaned[:limit].rstrip("-")
 
 
 ID_ATTEMPTS = 50

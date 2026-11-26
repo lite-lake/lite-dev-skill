@@ -2,6 +2,22 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.3 — 2026-11-26
+
+The directory slug follows the title's script instead of forcing one width on
+every language.
+
+### Changed
+
+- A Chinese title keeps its characters in the directory name, capped at 30
+  characters; an English title keeps the dash-joined form and the 32-character
+  cap. The rule reads the title, not `[project] language`: a Chinese title in an
+  English-language project keeps its slug instead of becoming empty.
+- `check` warns when a Chinese slug exceeds 20 characters. It is a warning, not
+  an error; the hard cap is 30.
+- `[flow] requires` stays `>=0.3.2,<0.4`: the slug is cosmetic and does not
+  change what the gate accepts.
+
 ## 0.3.2 — 2026-11-26
 
 Work items are filed by month, so a long-lived project does not keep thousands

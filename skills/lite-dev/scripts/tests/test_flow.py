@@ -192,8 +192,9 @@ class BaseCase(unittest.TestCase):
         title: str = "Demo item",
         size: str = "L",
         bucket: str = "2026-01",
+        slug: str = "demo",
     ):
-        directory = self.root / f"docs/work/{bucket}/{item_id}-demo"
+        directory = self.root / f"docs/work/{bucket}/{item_id}-{slug}"
         self._write(
             directory / "item.md",
             ITEM.format(
@@ -316,6 +317,34 @@ class StampTest(unittest.TestCase):
         self.assertEqual(clock.allocate("2026-01-02", moment), first)
 
 
+class SlugTest(unittest.TestCase):
+    """The slug follows the title's script, not the project's language."""
+
+    def test_chinese_title_keeps_its_characters(self) -> None:
+        self.assertEqual(flow._slugify("修复登录超时"), "修复登录超时")
+
+    def test_english_title_joins_words_with_dashes(self) -> None:
+        self.assertEqual(flow._slugify("Fix Login Bug"), "Fix-Login-Bug")
+
+    def test_mixed_title_keeps_both_scripts(self) -> None:
+        self.assertEqual(flow._slugify("修复 login 超时"), "修复-login-超时")
+
+    def test_chinese_slug_caps_at_thirty_characters(self) -> None:
+        self.assertEqual(len(flow._slugify("修复" * 20)), artifacts.SLUG_WIDE_MAX)
+
+    def test_english_slug_keeps_the_thirty_two_character_cap(self) -> None:
+        self.assertEqual(len(flow._slugify("word " * 20)), artifacts.SLUG_ASCII_MAX)
+
+    def test_a_cut_never_leaves_a_trailing_dash(self) -> None:
+        # 29 Chinese characters then a space: the cut lands right after the dash.
+        slug = flow._slugify("修" * 29 + " x")
+        self.assertEqual(len(slug), artifacts.SLUG_WIDE_MAX - 1)
+        self.assertFalse(slug.endswith("-"))
+
+    def test_punctuation_only_title_has_no_slug(self) -> None:
+        self.assertEqual(flow._slugify("!!! ???"), "")
+
+
 class NewTest(BaseCase):
     def test_new_allocates_id_and_renders_template(self) -> None:
         code, output = self.run_flow(
@@ -342,6 +371,15 @@ class NewTest(BaseCase):
         bucket = self.root / "docs/work/2026-03"
         self.assertTrue(bucket.is_dir(), bucket)
         self.assertEqual([p.name for p in bucket.iterdir()], [f"{item_id}-March"])
+
+    def test_new_keeps_a_chinese_title_in_the_directory(self) -> None:
+        code, output = self.run_flow(
+            "new", "--title", "修复登录超时", "--type", "BUG", "--size", "S"
+        )
+        self.assertEqual(code, 0, output)
+        item = artifacts.all_items(self.profile)[0]
+        self.assertTrue(item.directory.name.endswith("-修复登录超时"), item.directory.name)
+        self.assertEqual(item.meta["title"], "修复登录超时")
 
     def test_ids_are_unique_for_identical_input(self) -> None:
         for _ in range(5):
@@ -431,6 +469,15 @@ class LayoutTest(BaseCase):
         self.assertFalse([error for error in errors if "empty" in error], errors)
         self.assertTrue(
             any("2026-01/empty: no item.md" in warning for warning in warnings), warnings
+        )
+
+    def test_long_chinese_slug_warns_but_does_not_block(self) -> None:
+        title = "支付回调重试时出现重复扣款并且用户余额显示不一致的问题排查"
+        self.make_item(slug=flow._slugify(title), title=title, size="S")
+        errors, warnings = checks.check_project(self.profile)
+        self.assertFalse([error for error in errors if "slug" in error], errors)
+        self.assertTrue(
+            any("keep Chinese titles within 20" in warning for warning in warnings), warnings
         )
 
     def test_find_item_resolves_an_id_inside_a_month(self) -> None:

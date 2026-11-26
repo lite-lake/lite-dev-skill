@@ -86,8 +86,10 @@ python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```
 
-- `new` allocates `{date}-{type}-{time}` and creates `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`;
-  it needs an identity (`--owner`, `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
+- `new` allocates `{date}-{type}-{time}` and creates
+  `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
+  (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
+  `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
 - `check` validates fields, AC, links, and design rules; `--work` limits it to one item.
 - `design-ready` refuses an incomplete design and writes `status: ready`.
 - `gate` validates the item under `--work` (or the whole project), then runs the

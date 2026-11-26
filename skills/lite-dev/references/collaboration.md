@@ -29,6 +29,13 @@ unique prefix; if a prefix matches more than one item it lists them and exits 2.
 It never guesses. Never hand-write an id: `check` validates it against
 `[id] format`.
 
+The directory slug follows the title's script: `Fix-Login-Bug` for English,
+`修复登录超时` for Chinese, with no transliteration either way. A Chinese slug
+caps at 30 characters and `check` warns past 20. The rule reads the title, not
+`[project] language`, so a Chinese title in an English-language project keeps its
+characters. Set `git config core.quotepath false` in the project, or `git status`
+prints those paths as `\346\226...` escapes.
+
 `{time}` is local wall-clock time. On a daylight-saving fall-back day the hour
 repeats, so ids created then are not strictly ordered and could in principle
 collide with one from the same hour before the change.

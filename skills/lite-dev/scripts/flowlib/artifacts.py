@@ -17,12 +17,20 @@ FM_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", re.S)
 HEADING_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
 AC_RE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(AC\d{2,3})\b[ \t]*(.*)$", re.M)
 MONTH_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
+CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 CLARIFIED = {"clarified", "confirmed", "ready", "已澄清", "已确认", "无歧义"}
 DROPPED = {"dropped", "cancelled", "canceled", "已放弃"}
 PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
 
 ITEM_FIELDS = ("id", "title", "type", "priority", "size", "mode", "owner", "created")
+
+# The directory slug follows the title's script: a Chinese title keeps its
+# characters, anything else is word-joined with '-'. Width is counted in
+# characters, so 30 Chinese characters read like 60 columns.
+SLUG_WIDE_MAX = 30
+SLUG_COMFORT = 20
+SLUG_ASCII_MAX = 32
 
 
 def month_of(created: str) -> str:

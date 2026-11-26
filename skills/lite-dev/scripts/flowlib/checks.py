@@ -198,6 +198,15 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     warnings: list[str] = []
     label = item.directory.name
 
+    slug = ""
+    if item.id and item.directory.name.startswith(item.id + "-"):
+        slug = item.directory.name[len(item.id) + 1:]
+    if slug and artifacts.CJK_RE.search(slug) and len(slug) > artifacts.SLUG_COMFORT:
+        warnings.append(
+            f"{label}: slug is {len(slug)} characters; keep Chinese titles within "
+            f"{artifacts.SLUG_COMFORT} (the directory name caps at {artifacts.SLUG_WIDE_MAX})"
+        )
+
     for entry in item.ac:
         if not entry["text"]:
             warnings.append(f"{label}: {entry['id']} has no description")

@@ -155,7 +155,7 @@ class ReleaseTest(unittest.TestCase):
             f"source: {source}\n"
             f"previous: {previous}\n"
             "by: tester\n"
-            "tool: 0.3.2\n"
+            "tool: 0.3.3\n"
             "---\n\n# Release\n",
         )
         return self.root / "docs/releases" / name
@@ -212,7 +212,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("channel: staging", text)
         self.assertIn("previous: none", text)
         self.assertIn("by: releaser", text)
-        self.assertIn("tool: 0.3.2", text)
+        self.assertIn("tool: 0.3.3", text)
         self.assertIn(head, text)
         self.assertIn("PASS l1", text)
         self.assertIn("revert", text)

@@ -17,6 +17,9 @@ Rules:
 - Do not rename a directory away from its `<id>` prefix; `check` reports it.
 - Do not move an item out of its month directory. The month comes from `created`,
   so `check` reports a mismatch instead of rewriting the path.
+- The slug comes from the title and follows its script: English words join with
+  `-`, Chinese stays Chinese. Keep a Chinese title within 20 characters; the
+  slug caps at 30.
 - Ids are `{date}-{type}-{time}` and sort in creation order; never write one by hand.
 - `owner` is required. Change it with `flow.py claim <ID>` and commit the change.
 - Do not add a status field. Status is derived from `## Clarify`, `design.md`, and `closed:`.
