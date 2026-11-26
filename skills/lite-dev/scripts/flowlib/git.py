@@ -174,12 +174,7 @@ def files_many(root: Path, shas: list[str]) -> list[str]:
     return [line.strip() for line in output.splitlines() if line.strip()]
 
 
-def commits(root: Path, since: str | None = None, limit: int | None = None) -> list[Commit]:
-    revision = f"{since}..HEAD" if since else "HEAD"
-    args = ["log", f"--format=%H%x1f%s%x1f%b%x1e", revision]
-    if limit:
-        args[1:1] = ["-n", str(limit)]
-    output = _run(root, *args)
+def _parse_log(output: str) -> list[Commit]:
     result: list[Commit] = []
     for chunk in output.split("\x1e"):
         chunk = chunk.strip("\n")
@@ -196,6 +191,36 @@ def commits(root: Path, since: str | None = None, limit: int | None = None) -> l
             )
         )
     return result
+
+
+def commits(root: Path, since: str | None = None, limit: int | None = None) -> list[Commit]:
+    revision = f"{since}..HEAD" if since else "HEAD"
+    args = ["log", f"--format=%H%x1f%s%x1f%b%x1e", revision]
+    if limit:
+        args[1:1] = ["-n", str(limit)]
+    return _parse_log(_run(root, *args))
+
+
+def commits_matching(root: Path, needle: str) -> list[Commit]:
+    """Commits whose message mentions `needle`, across all of HEAD's history.
+
+    Deliberately unbounded: an item that spans days can have its earliest
+    commits slide out of any fixed window, and a scan that stopped early would
+    turn "this change touches no risk path" into a lie. `--fixed-strings` keeps
+    an id from being read as a pattern; `--grep=<needle>` as one argument keeps
+    a needle starting with '-' from being parsed as an option.
+    """
+    if not needle:
+        return []
+    output = _run(
+        root,
+        "log",
+        f"--format=%H%x1f%s%x1f%b%x1e",
+        "--fixed-strings",
+        f"--grep={needle}",
+        "HEAD",
+    )
+    return _parse_log(output)
 
 
 def total_commits(root: Path, since: str | None = None) -> int:

@@ -326,6 +326,9 @@ def cmd_status(args) -> int:
     # close. Do not open every session with a warning it cannot act on.
     gate_relevant = any(item.status in {"ready", "done"} for item in items)
     stale = gate_log.stale_line(profile, full) if full and gate_relevant else None
+    advisories = [
+        line for line in (checks.full_level_warning(profile), stale) if line
+    ]
     stale_rows: list[dict] = []
     stale_note = ""
     if args.stale:
@@ -334,6 +337,7 @@ def cmd_status(args) -> int:
     if args.json:
         payload = {
             "project": profile.name,
+            "version": __version__,
             "profile": str(profile.path.relative_to(profile.root)),
             "checkout": checkout,
             "mine": mine or None,
@@ -379,6 +383,7 @@ def cmd_status(args) -> int:
         return 0
 
     print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
+    print(f"  lite-dev {__version__}")
     if checkout:
         label = checkout["branch"] or "detached HEAD"
         if checkout["upstream"]:
@@ -394,8 +399,7 @@ def cmd_status(args) -> int:
         archived = len(artifacts.archived_items(profile))
         if archived:
             print(f"{archived} archived ({profile.work_dir}/_archive/README.md)")
-        if stale:
-            print(f"\nwarn: {stale}")
+        _print_advisories(advisories)
         if args.stale:
             _print_stale(stale_rows, stale_note, args.days)
         return 0
@@ -440,8 +444,7 @@ def cmd_status(args) -> int:
     archived = len(artifacts.archived_items(profile))
     if archived:
         print(f"{archived} archived ({profile.work_dir}/_archive/README.md)")
-    if stale:
-        print(f"\nwarn: {stale}")
+    _print_advisories(advisories)
     if args.stale:
         _print_stale(stale_rows, stale_note, args.days)
 
@@ -468,6 +471,15 @@ def _print_issues(errors: list[str], warnings: list[str]) -> None:
         print(f"  error: {error}")
     for warning in warnings:
         print(f"  warn:  {warning}")
+
+
+def _print_advisories(advisories: list[str]) -> None:
+    """Profile-level advice that never blocks: `status` prints, the gate decides."""
+    if not advisories:
+        return
+    print()
+    for line in advisories:
+        print(f"warn: {line}")
 
 
 def cmd_check(args) -> int:
@@ -549,17 +561,17 @@ def cmd_gate(args) -> int:
     profile = _load_profile(args)
     errors, warnings = checks.check_project(profile, work=args.work)
     item = None
-    changed: list[str] = []
+    changed = checks.ChangeSet()
     if args.work:
         item = artifacts.find_item(profile, args.work)
     try:
         changed = (
             checks.changed_paths(profile, item)
             if item is not None
-            else git.worktree_paths(profile.root)
+            else checks.ChangeSet(worktree=git.worktree_paths(profile.root))
         )
     except git.GitError:
-        changed = []
+        changed = checks.ChangeSet()
 
     if item is not None:
         risk_errors, risk_warnings = checks.risk_gate(item, profile, changed)
@@ -630,6 +642,12 @@ def cmd_done(args) -> int:
     if closed:
         print(f"{item.id} is already closed ({closed})")
         return 0
+
+    # Say which level this close will actually ride on before refusing anything:
+    # a profile that defines only a cheap level is legal, not silent.
+    advisory = checks.full_level_warning(profile)
+    if advisory:
+        print(f"warn: {advisory}")
 
     if artifacts.is_archived(item):
         raise FlowError(
@@ -1096,6 +1114,10 @@ def cmd_init(args) -> int:
     else:
         print(f"check: PASS — no errors ({len(warnings)} warning(s); warnings do not block)")
     _print_issues(errors, warnings)
+
+    advisory = checks.full_level_warning(profile)
+    if advisory:
+        print(f"warn:    {advisory}")
 
     resolved = identity.try_resolve(root)
     if resolved is None:

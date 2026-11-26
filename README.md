@@ -149,7 +149,8 @@ examples/minimal/           a working single-repo project
 | handoff prompt assembled from the artifacts | the judgement behind the next step |
 | document reachability, index-graph connectivity, entry-document pins, archive index | whether the prose is true |
 | decision chains, exemption expiry, item staleness from git | what should be cleaned up or re-reviewed |
-| risk-path design gate, per-clone gate freshness | how risky a change actually is |
+| risk-path design gate over the whole history, each hit labelled worktree or committed | how risky a change actually is |
+| per-clone gate freshness, the strictest level `done` will close on, the running version | when a recorded PASS is still current |
 | identity, claim/takeover, archived read-only lifecycle | who is trusted to change what |
 
 Anything left of the line is a script because agents self-report it badly.
@@ -237,7 +238,9 @@ The current release implements `init` (with `--adopt` and `--baseline`), `new`,
 (including `decision.md`), the invariants, document hygiene checks, index-graph
 connectivity, decision chains, the expiring exemption ledger, cumulative
 evidence (`done` refuses any item without a passing report, a recorded full-level
-gate PASS, and an identity), ordered batch graphs, the risk-path design gate, the
+gate PASS, and an identity), ordered batch graphs, the risk-path design gate over
+the whole history with worktree/committed provenance, the strictest-level
+announcement `done`/`status`/`init` print, the
 per-clone gate ledger, release bookkeeping/debt separation, three bundled
 extensions, and a runnable single-repo example. Planned: a multi-repo workspace
 profile.

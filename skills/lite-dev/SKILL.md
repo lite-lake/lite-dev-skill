@@ -222,6 +222,10 @@ gate.
   then runs the commands. `done` requires a PASS for the item at the strictest
   level in *this* clone; a project-wide run does not name the item. A bare
   `check` and a release still validate the project.
+- `done` closes on the strictest level the profile defines, and `status`,
+  `init`, and `done` say which one that is when it is not `l3`. l3 must be
+  runnable locally; if it only exists in CI, wrap it as a local command that
+  waits for that CI run.
 - A change under `[gate] fallback_paths` (lock files, schema runs, toolchain pins)
   invalidates the cheap level: the gate says to run the strictest one.
 - The strictest level's last PASS is remembered per clone. `status` and a cheaper

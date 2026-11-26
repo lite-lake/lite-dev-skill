@@ -2,6 +2,38 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.3.9 — 2026-11-27
+
+风险路径与回退路径现在按整段历史判定，而不是按一个窗口；每一条命中都会注明它来自
+worktree 还是来自该条目自己的提交；`done` 也会说出它究竟在哪一级收口。
+
+### 新增
+
+- `gate --work` 为每条风险路径、回退路径命中注明来源：`db/schema.sql (worktree)`、
+  `deps.txt (committed)`，或 `(worktree + committed)`。worktree 里的文件仍然参与
+  判定——未提交的改动也是真实工作——但一个与本次改动无关的脏文件现在会以「worktree」
+  的身份出现，而不是默默决定判定结果。
+- `status` 打印正在运行的 lite-dev 版本（`status --json` 里也带 `version`），
+  于是一个还在跑旧安装的克隆是看得见的。
+- profile 的最严级别不是 l3 时，`done`、`status`、`init` 给一条警告：
+  `the strictest gate is l1; done will close on l1`。它点出当前级别和该改的 profile，
+  但拒绝条件一条都没变。
+
+### 变更
+
+- 风险路径与回退路径的判定扫描整段历史
+  （`git log --fixed-strings --grep=<条目 id>`，`flowlib/git.commits_matching`），
+  不再只看最近 200 个提交。跨天的条目不会丢掉早期提交，所以风险路径不会因为提交
+  滑出窗口而静默通过门禁。
+- `SKILL.md` §7 写明：l3 必须能在本地跑；只在 CI 存在的 l3 要包成一个会等待该次 CI
+  的本地命令。
+- `profile.template.toml` 要求 `>=0.3.9,<0.4`。
+
+### 破坏性变更
+
+- 无。钉在 `>=0.3.8,<0.4` 的 profile 仍可加载；风险与回退警告多了来源标注，属于
+  信息变化，不是规则变化。
+
 ## 0.3.8 — 2026-11-27
 
 接入现在由工具完成，而不是靠人照 README 抄：`init` 既能给新项目也能给已有项目搭骨架，

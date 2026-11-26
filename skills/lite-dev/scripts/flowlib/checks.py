@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import date
 
 from . import artifacts, docs, git, identity
@@ -449,23 +450,61 @@ def risk_paths_touched(profile: Profile, paths: list[str]) -> list[str]:
     )
 
 
+@dataclass
+class ChangeSet:
+    """The item's changed paths, split by where they were found.
+
+    Uncommitted work is real work — the change being gated is often exactly
+    what sits in the worktree — but a long-lived clone also carries dirty files
+    that belong to nobody's item. Keeping the two sources apart lets a risk or
+    fallback warning say which one it saw, so the reader can tell "this is my
+    change" from "this was already dirty".
+    """
+
+    worktree: list[str] = field(default_factory=list)
+    committed: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.worktree = list(dict.fromkeys(self.worktree))
+        self.committed = list(dict.fromkeys(self.committed))
+
+    @property
+    def paths(self) -> list[str]:
+        return list(dict.fromkeys([*self.worktree, *self.committed]))
+
+    def label(self, path: str) -> str:
+        in_worktree = path in self.worktree
+        in_committed = path in self.committed
+        if in_worktree and in_committed:
+            return "worktree + committed"
+        return "worktree" if in_worktree else "committed"
+
+    def describe(self, paths: list[str]) -> str:
+        """`db/schema.sql (worktree), deps.txt (committed)`, capped at three."""
+        listed = ", ".join(f"{path} ({self.label(path)})" for path in paths[:3])
+        if len(paths) > 3:
+            listed += f" (+{len(paths) - 3} more)"
+        return listed
+
+
 def risk_gate(
-    item: artifacts.Item, profile: Profile, changed: list[str]
+    item: artifacts.Item, profile: Profile, changed: ChangeSet
 ) -> tuple[list[str], list[str]]:
     """Paths that demand a design, and the exemption that keeps docs from tripping it.
 
     `risk_paths` are structural: contracts, schema, permissions, deploy scripts.
     `risk_exempt` is the escape hatch that makes the rule usable — a work item
     whose only change is prose about a risk path must not require a design.
+    Each hit names where it came from, so an unrelated dirty file is not
+    mistaken for this item's change.
     """
-    if not profile.design_risk_paths or not changed:
+    if not profile.design_risk_paths or not changed.paths:
         return [], []
-    touched = risk_paths_touched(profile, changed)
+    touched = risk_paths_touched(profile, changed.paths)
     if not touched or item.design_status == "ready":
         return [], []
-    listed = ", ".join(touched[:3]) + (f" (+{len(touched) - 3} more)" if len(touched) > 3 else "")
     message = (
-        f"{item.id} changes a risk path ({listed}) without a ready design; "
+        f"{item.id} changes a risk path without a ready design: {changed.describe(touched)}; "
         "write design.md and run flow.py design-ready <ID>, or narrow the change"
     )
     if profile.design_risk_gate == "block":
@@ -473,47 +512,70 @@ def risk_gate(
     return [], [message]
 
 
-def changed_paths(profile: Profile, item: artifacts.Item) -> list[str]:
+def changed_paths(profile: Profile, item: artifacts.Item) -> ChangeSet:
     """The item's work: uncommitted paths plus paths in its own commits.
 
-    Reading commits is bounded so a long history cannot make the gate slow; the
-    worktree alone would miss work the implementer already committed.
+    Commits are found by grepping the whole history for the item id, with no
+    fixed window: a window silently drops the first commits of a long item and
+    reports "no risk path" for a change that touched one. The worktree
+    participates because the change under the gate is often not committed yet;
+    the label keeps that provenance visible.
     """
-    paths: list[str] = []
+    changed = ChangeSet()
     try:
         if not git.is_repo(profile.root):
-            return paths
-        paths.extend(git.worktree_paths(profile.root))
-        recent = git.commits(profile.root, limit=200)
-        owned = [
-            commit
-            for commit in recent
-            if item.id and item.id in f"{commit.subject}\n{commit.body}"
-        ]
-        paths.extend(git.files_many(profile.root, [commit.sha for commit in owned]))
+            return changed
+        changed.worktree = git.worktree_paths(profile.root)
+        owned = git.commits_matching(profile.root, item.id) if item.id else []
+        changed.committed = git.files_many(profile.root, [commit.sha for commit in owned])
     except git.GitError:
-        return paths
-    return list(dict.fromkeys(paths))
+        return changed
+    return changed
 
 
-def fallback_warnings(profile: Profile, level: str, changed: list[str]) -> list[str]:
+def fallback_warnings(profile: Profile, level: str, changed: ChangeSet) -> list[str]:
     """A cheap level does not cover a dependency-file change; say so.
 
     This is the contract behind l1: it is fast because it is scoped, and a
-    change that invalidates the scope has to fall back to the full level.
+    change that invalidates the scope has to fall back to the full level. The
+    hit names whether it is committed or still in the worktree.
     """
-    if not profile.gate_fallback_paths or not changed:
+    if not profile.gate_fallback_paths or not changed.paths:
         return []
     full = profile.full_level
     if full is None or level == full:
         return []
-    hits = sorted({path for path in changed if _path_matches(path, profile.gate_fallback_paths)})
+    hits = sorted(
+        {path for path in changed.paths if _path_matches(path, profile.gate_fallback_paths)}
+    )
     if not hits:
         return []
     return [
-        f"changed {', '.join(hits[:3])} invalidates {level}; "
+        f"changed {changed.describe(hits)} invalidates {level}; "
         f"run gate --level {full} before committing"
     ]
+
+
+def full_level_warning(profile: Profile) -> str | None:
+    """Name the level `done` will close on when it is not l3.
+
+    `full_level` is the strictest level the profile defines, which is what the
+    gate records and what `done` requires — not necessarily what the project
+    believes it requires. Saying it out loud separates a deliberate choice from
+    a profile that quietly lost its strictest level, and it is a warning: the
+    refusal conditions do not change.
+    """
+    full = profile.full_level
+    if full is None or full == "l3":
+        return None
+    try:
+        relative = profile.path.relative_to(profile.root)
+    except ValueError:
+        relative = profile.path
+    return (
+        f"the strictest gate is {full}; done will close on {full} — "
+        f"add [gate] l3 to {relative} (with at least one command) if that is not intended"
+    )
 
 
 def quotepath_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:

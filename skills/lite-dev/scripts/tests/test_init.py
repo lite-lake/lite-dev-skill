@@ -144,6 +144,20 @@ class InitTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn('mainline = "main"', self.profile_text())
 
+    def test_init_names_a_profile_whose_strictest_level_is_not_l3(self) -> None:
+        """A profile that lost its strictest level is legal, not silent."""
+        self.init_repo()
+        self.run_flow()
+        path = self.root / "docs/flow/profile.toml"
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace('l2 = ["test"]\n', "").replace('l3 = ["test"]\n', ""),
+            encoding="utf-8",
+        )
+        code, output, _ = self.run_flow()
+        self.assertEqual(code, 0, output)
+        self.assertIn("the strictest gate is l1; done will close on l1", output)
+
     def test_baseline_needs_a_clean_tree(self) -> None:
         self.init_repo()
         self.run_flow()

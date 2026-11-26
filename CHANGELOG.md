@@ -2,6 +2,42 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.9 — 2026-11-27
+
+Risk and fallback paths are now judged over the whole history instead of a
+window, every hit says whether it came from the worktree or from the item's own
+commits, and `done` says which level it will actually close on.
+
+### Added
+
+- `gate --work` names the source of each risk-path and fallback-path hit:
+  `db/schema.sql (worktree)`, `deps.txt (committed)`, or
+  `(worktree + committed)`. Worktree files still count — uncommitted work is
+  real work — but an unrelated dirty file is now visible as such instead of
+  silently deciding the verdict.
+- `status` prints the running lite-dev version (and carries it as `version` in
+  `status --json`), so a clone that is running an older install is visible.
+- `done`, `status`, and `init` warn when the profile's strictest level is not
+  l3: `the strictest gate is l1; done will close on l1` names the level and the
+  profile to change. The refusal conditions are unchanged.
+
+### Changed
+
+- Risk-path and fallback-path detection scans the whole history
+  (`git log --fixed-strings --grep=<item id>`, `flowlib/git.commits_matching`)
+  instead of the last 200 commits. An item that spans days no longer loses its
+  early commits, so a risk path cannot pass the gate because its commit aged
+  out of a window.
+- `SKILL.md` §7 states that l3 must be runnable locally, and that a CI-only l3
+  has to be wrapped as a local command that waits for the CI run.
+- `profile.template.toml` requires `>=0.3.9,<0.4`.
+
+### Breaking changes
+
+- None. A profile pinned to `>=0.3.8,<0.4` still loads; the risk and fallback
+  warnings now carry a provenance label, which is a message change, not a rule
+  change.
+
 ## 0.3.8 — 2026-11-27
 
 Adoption is now a step the tool performs instead of a README to follow: `init`
