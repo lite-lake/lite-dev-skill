@@ -13,13 +13,14 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.3,<0.4"
+requires = ">=0.3.1,<0.4"
 
 [id]
-# {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {rand} -> 5 random chars.
-# The random token makes ids unique across clones and machines without a lock;
-# do not drop it. Ownership lives in each item's `owner` field, not here.
-format = "{date}-{type}-{rand}"
+# {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of
+# milliseconds since local midnight. The time code sorts ids in creation order
+# and lets a clone allocate one without a lock; do not drop it.
+# Ownership lives in each item's `owner` field, not here.
+format = "{date}-{type}-{time}"
 
 [gate]
 # Ordered command names per level. l1 = fast iteration, l2 = batch

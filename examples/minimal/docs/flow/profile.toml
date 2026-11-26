@@ -5,10 +5,10 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.3,<0.4"
+requires = ">=0.3.1,<0.4"
 
 [id]
-format = "{date}-{type}-{rand}"
+format = "{date}-{type}-{time}"
 
 [gate]
 l1 = ["test"]

@@ -109,7 +109,7 @@ examples/minimal/           a working single-repo project
 
 | Deterministic (`flow.py`) | Model |
 |---|---|
-| collision-resistant id allocation, directory scaffold | clarifying questions, trade-offs |
+| time-ordered id allocation, directory scaffold | clarifying questions, trade-offs |
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
 | required fields, links, AC↔batch↔verification | code and tests |
@@ -153,9 +153,12 @@ The flow is files plus git; there is no server, no lock service, and no network
 call. Three rules make that work for several people, several machines, and
 parallel agent sessions:
 
-- **Ids never need coordination.** `{date}-{type}-{rand}` gives every clone a
-  collision-resistant id. A prefix that matches two items is an error with the
-  candidates listed; the tool never guesses.
+- **Ids sort by time and need no coordination.** `{date}-{type}-{time}` encodes
+  the millisecond of the local day, so a clone allocates an id alone and ids
+  list in creation order. Two creators stamping the same millisecond is the one
+  collision left; `check` reports the duplicate instead of merging it. A prefix
+  that matches two items is an error with the candidates listed; the tool never
+  guesses.
 - **Ownership is explicit.** `owner` is required and resolved from `--owner`,
   `$LITE_DEV_OWNER`, or `git config lite-dev.owner` — never from `user.name`.
   `claim` takes over an item and `status --mine` filters.

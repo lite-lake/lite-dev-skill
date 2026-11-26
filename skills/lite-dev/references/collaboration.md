@@ -19,11 +19,19 @@ teammates and `status --mine` see it.
 
 ## Ids
 
-An id is `{date}-{type}-{rand}` (for example `20261126-REQ-k7m2p`). The random
-token means two clones creating an item on the same day never collide, even if
-neither has pulled. `find_item` accepts the full id or a unique prefix; if a
-prefix matches more than one item it lists them and exits 2. It never guesses.
-Never hand-write an id: `check` validates it against `[id] format`.
+An id is `{date}-{type}-{time}` (for example `20261126-REQ-3yharx`). `{time}` is
+the millisecond of the local day in six characters, so ids list in creation
+order and a clone allocates one without a lock or a pull. Two creators that
+stamp the same millisecond get the same code: `check` reports the duplicate id
+instead of merging them, and `new` bumps past any code already on disk. That is
+the one case where pulling first matters. `find_item` accepts the full id or a
+unique prefix; if a prefix matches more than one item it lists them and exits 2.
+It never guesses. Never hand-write an id: `check` validates it against
+`[id] format`.
+
+`{time}` is local wall-clock time. On a daylight-saving fall-back day the hour
+repeats, so ids created then are not strictly ordered and could in principle
+collide with one from the same hour before the change.
 
 ## Claiming
 
@@ -60,8 +68,8 @@ with different rules.
 1. Set `lite-dev.owner` globally, not per repository.
 2. `new`, then commit and push the item before switching machines. An uncommitted
    item does not exist anywhere else.
-3. Pull before `new`: it is still safe without pulling (ids are random), but your
-   `status` is otherwise blind to teammates' work.
+3. Pull before `new`: it is still safe without pulling (the time code rarely
+   collides), but your `status` is otherwise blind to teammates' work.
 4. Never record a release from a machine that has not pulled the last record.
 5. `status` reflects the current checkout only. Switch branches or pull before
    asking where an item stands; "work is never half-done on main" stays a human

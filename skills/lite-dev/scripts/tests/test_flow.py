@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -14,7 +15,7 @@ import flow  # noqa: E402
 from flowlib import artifacts, checks, commands  # noqa: E402
 from flowlib import profile as profile_mod  # noqa: E402
 
-ITEM_ID = "20260101-REQ-k7m2p"
+ITEM_ID = "20260101-REQ-k7m2pa"
 
 PROFILE = """\
 [project]
@@ -24,10 +25,10 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.3,<0.4"
+requires = ">=0.3.1,<0.4"
 
 [id]
-format = "{date}-{type}-{rand}"
+format = "{date}-{type}-{time}"
 
 [gate]
 l1 = ["test"]
@@ -169,6 +170,9 @@ class BaseCase(unittest.TestCase):
             },
         )
         self._env.start()
+        # Each test starts from a fresh allocator, so a mocked clock is not
+        # pushed forward by a previous test in the same process.
+        flow._CLOCK = flow.stamp.Clock()
 
     def tearDown(self) -> None:
         self._env.stop()
@@ -234,10 +238,10 @@ class ProfileTest(BaseCase):
         with self.assertRaises(profile_mod.ProfileError):
             profile_mod.load(self.profile_path)
 
-    def test_id_format_requires_a_random_token(self) -> None:
+    def test_id_format_requires_a_time_token(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('format = "{date}-{type}-{rand}"', 'format = "{date}-{type}-{seq:02d}"'),
+            PROFILE.replace('format = "{date}-{type}-{time}"', 'format = "{date}-{type}-{seq:02d}"'),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -255,7 +259,7 @@ class ProfileTest(BaseCase):
     def test_flow_requires_pins_the_version(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('requires = ">=0.3,<0.4"', 'requires = ">=9,<10"'),
+            PROFILE.replace('requires = ">=0.3.1,<0.4"', 'requires = ">=9,<10"'),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -264,11 +268,45 @@ class ProfileTest(BaseCase):
     def test_flow_table_is_required(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('[flow]\nrequires = ">=0.3,<0.4"\n\n', ""),
+            PROFILE.replace('[flow]\nrequires = ">=0.3.1,<0.4"\n\n', ""),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
         self.assertIn("[flow] table is required", str(raised.exception))
+
+
+class StampTest(unittest.TestCase):
+    """The time code in an id: fixed width, sortable, bounded to one day."""
+
+    def test_code_is_fixed_width_and_zero_padded(self) -> None:
+        zero = profile_mod.TIME_ALPHABET[0] * profile_mod.TIME_LEN
+        self.assertEqual(flow.stamp.encode(0), zero)
+        for ms in (0, 1, 999, 12_345_678, flow.stamp.MS_PER_DAY - 1):
+            self.assertEqual(len(flow.stamp.encode(ms)), profile_mod.TIME_LEN)
+
+    def test_codes_sort_in_time_order(self) -> None:
+        samples = [0, 1, 1_000, 61_001, 3_600_000, flow.stamp.MS_PER_DAY - 1]
+        codes = [flow.stamp.encode(ms) for ms in samples]
+        self.assertEqual(codes, sorted(codes))
+
+    def test_out_of_range_is_rejected(self) -> None:
+        for ms in (-1, flow.stamp.MS_PER_DAY):
+            with self.assertRaises(ValueError):
+                flow.stamp.encode(ms)
+
+    def test_every_character_comes_from_the_profile_alphabet(self) -> None:
+        for ms in (0, 7, 61_001, 12_345_678, flow.stamp.MS_PER_DAY - 1):
+            code = flow.stamp.encode(ms)
+            self.assertTrue(set(code) <= set(profile_mod.TIME_ALPHABET), code)
+            self.assertEqual(len(code), profile_mod.TIME_LEN)
+
+    def test_clock_never_hands_out_the_same_code(self) -> None:
+        clock = flow.stamp.Clock()
+        moment = datetime(2026, 1, 1, 6, 0, 0)
+        first = clock.allocate("2026-01-01", moment)
+        clock.commit("2026-01-01", first)
+        self.assertEqual(clock.allocate("2026-01-01", moment), first + 1)
+        self.assertEqual(clock.allocate("2026-01-02", moment), first)
 
 
 class NewTest(BaseCase):
@@ -309,6 +347,51 @@ class NewTest(BaseCase):
         self.assertEqual(code, 0, output)
         directory = [path for path in (self.root / "docs/work").iterdir() if path.is_dir()][0]
         self.assertEqual(artifacts.load_item(directory).meta["owner"], "bob")
+
+
+class IdStampTest(BaseCase):
+    """`new` derives the date and the time code from one clock read."""
+
+    def test_id_encodes_the_millisecond_of_the_local_day(self) -> None:
+        moment = datetime(2026, 3, 4, 9, 30, 15, 123_000)
+        with mock.patch.object(flow.stamp, "now", return_value=moment):
+            code, output = self.run_flow(
+                "new", "--title", "Clock", "--type", "REQ", "--size", "S"
+            )
+        self.assertEqual(code, 0, output)
+        ms = flow.stamp.ms_since_midnight(moment)
+        self.assertIn(f"created 20260304-REQ-{flow.stamp.encode(ms)}", output)
+
+    def test_same_millisecond_gets_the_next_code(self) -> None:
+        moment = datetime(2026, 3, 4, 9, 30, 15, 123_000)
+        ms = flow.stamp.ms_since_midnight(moment)
+        ids = []
+        with mock.patch.object(flow.stamp, "now", return_value=moment):
+            for _ in range(2):
+                code, output = self.run_flow(
+                    "new", "--title", "Twin", "--type", "REQ", "--size", "S"
+                )
+                self.assertEqual(code, 0, output)
+                ids.append(output.split()[1])
+        self.assertEqual(ids[0], f"20260304-REQ-{flow.stamp.encode(ms)}")
+        self.assertEqual(ids[1], f"20260304-REQ-{flow.stamp.encode(ms + 1)}")
+
+    def test_generated_id_matches_the_profile_pattern(self) -> None:
+        for ms in (0, 61_001, flow.stamp.MS_PER_DAY - 1):
+            item_id = f"20261126-REQ-{flow.stamp.encode(ms)}"
+            match = self.profile.id_pattern.search(item_id)
+            self.assertIsNotNone(match, item_id)
+            self.assertEqual(match.group(0), item_id)
+
+    def test_last_millisecond_stays_in_the_same_day(self) -> None:
+        moment = datetime(2026, 12, 31, 23, 59, 59, 999_000)
+        with mock.patch.object(flow.stamp, "now", return_value=moment):
+            code, output = self.run_flow(
+                "new", "--title", "Midnight", "--type", "REQ", "--size", "S"
+            )
+        self.assertEqual(code, 0, output)
+        last = flow.stamp.encode(flow.stamp.MS_PER_DAY - 1)
+        self.assertIn(f"created 20261231-REQ-{last}", output)
 
 
 class StatusTest(BaseCase):
@@ -454,29 +537,29 @@ class IdentityTest(BaseCase):
         self.assertEqual(artifacts.find_item(self.profile, item.id).meta["owner"], "bob")
 
     def test_status_mine_filters_by_identity(self) -> None:
-        self.make_item(item_id="20260101-REQ-aaaaa", owner="alice")
-        self.make_item(item_id="20260101-REQ-bbbbb", owner="bob")
+        self.make_item(item_id="20260101-REQ-aaaaaa", owner="alice")
+        self.make_item(item_id="20260101-REQ-bbbbbb", owner="bob")
         code, output = self.run_flow("status", "--mine")
         self.assertEqual(code, 0)
-        self.assertIn("20260101-REQ-aaaaa", output)
-        self.assertNotIn("20260101-REQ-bbbbb", output)
+        self.assertIn("20260101-REQ-aaaaaa", output)
+        self.assertNotIn("20260101-REQ-bbbbbb", output)
         with mock.patch.dict(os.environ, {"LITE_DEV_OWNER": "bob"}):
             code, output = self.run_flow("status", "--mine")
-        self.assertIn("20260101-REQ-bbbbb", output)
+        self.assertIn("20260101-REQ-bbbbbb", output)
 
 
 class TargetingTest(BaseCase):
     def test_ambiguous_prefix_is_an_error(self) -> None:
-        self.make_item(item_id="20260101-REQ-aaaaa")
-        self.make_item(item_id="20260101-REQ-aaaab")
+        self.make_item(item_id="20260101-REQ-aaaaaa")
+        self.make_item(item_id="20260101-REQ-aaaaab")
         code, output = self.run_flow("done", "20260101-REQ-aaaa")
         self.assertEqual(code, 2)
         self.assertIn("ambiguous", output)
-        self.assertIn("20260101-REQ-aaaaa", output)
-        self.assertIn("20260101-REQ-aaaab", output)
+        self.assertIn("20260101-REQ-aaaaaa", output)
+        self.assertIn("20260101-REQ-aaaaab", output)
 
     def test_unique_prefix_resolves(self) -> None:
-        self.make_item(item_id="20260101-REQ-aaaaa", ac="- [x] AC01 works", size="S")
+        self.make_item(item_id="20260101-REQ-aaaaaa", ac="- [x] AC01 works", size="S")
         code, output = self.run_flow("done", "20260101-REQ-aaaa")
         self.assertEqual(code, 0, output)
 
@@ -485,11 +568,16 @@ class TargetingTest(BaseCase):
         errors, _ = checks.check_project(self.profile)
         self.assertTrue(any("does not match [id] format" in error for error in errors))
 
+    def test_five_character_suffix_no_longer_matches_the_format(self) -> None:
+        self.make_item(item_id="20260101-REQ-k7m2p")
+        errors, _ = checks.check_project(self.profile)
+        self.assertTrue(any("does not match [id] format" in error for error in errors))
+
 
 class CheckScopeTest(BaseCase):
     def test_gate_work_ignores_another_broken_item(self) -> None:
-        good = self.make_item(item_id="20260101-REQ-aaaaa", size="S")
-        broken = self.make_item(item_id="20260101-REQ-bbbbb", owner="")
+        good = self.make_item(item_id="20260101-REQ-aaaaaa", size="S")
+        broken = self.make_item(item_id="20260101-REQ-bbbbbb", owner="")
         self.assertTrue(broken.meta.get("owner", "") == "")
 
         code, output = self.run_flow("gate", "--level", "l1", "--work", good.id)
@@ -500,9 +588,9 @@ class CheckScopeTest(BaseCase):
         self.assertIn("missing frontmatter field 'owner'", output)
 
     def test_check_work_validates_only_the_named_item(self) -> None:
-        self.make_item(item_id="20260101-REQ-aaaaa", size="S")
-        self.make_item(item_id="20260101-REQ-bbbbb", owner="")
-        code, output = self.run_flow("check", "--work", "20260101-REQ-aaaaa")
+        self.make_item(item_id="20260101-REQ-aaaaaa", size="S")
+        self.make_item(item_id="20260101-REQ-bbbbbb", owner="")
+        code, output = self.run_flow("check", "--work", "20260101-REQ-aaaaaa")
         self.assertEqual(code, 0, output)
 
 

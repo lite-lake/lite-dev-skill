@@ -17,8 +17,8 @@ sys.path.insert(0, str(SCRIPTS))
 import flow  # noqa: E402
 
 TODAY = date.today().isoformat()
-ITEM_ID = "20260101-REQ-k7m2p"
-MISSING_ID = "20260101-REQ-zzzzz"
+ITEM_ID = "20260101-REQ-k7m2pa"
+MISSING_ID = "20260101-REQ-zzzzzz"
 
 PROFILE = """\
 [project]
@@ -26,10 +26,10 @@ name = "release-project"
 language = "en"
 
 [flow]
-requires = ">=0.3,<0.4"
+requires = ">=0.3.1,<0.4"
 
 [id]
-format = "{date}-{type}-{rand}"
+format = "{date}-{type}-{time}"
 
 [gate]
 l1 = ["test"]
@@ -155,7 +155,7 @@ class ReleaseTest(unittest.TestCase):
             f"source: {source}\n"
             f"previous: {previous}\n"
             "by: tester\n"
-            "tool: 0.3.0\n"
+            "tool: 0.3.1\n"
             "---\n\n# Release\n",
         )
         return self.root / "docs/releases" / name
@@ -212,7 +212,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("channel: staging", text)
         self.assertIn("previous: none", text)
         self.assertIn("by: releaser", text)
-        self.assertIn("tool: 0.3.0", text)
+        self.assertIn("tool: 0.3.1", text)
         self.assertIn(head, text)
         self.assertIn("PASS l1", text)
         self.assertIn("revert", text)

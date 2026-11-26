@@ -2,6 +2,35 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.1 — 2026-11-26
+
+Item ids carry the millisecond of the local day, so they sort in creation order.
+
+### Breaking changes
+
+- Item ids are `{date}-{type}-{time}`. `{time}` is the millisecond since local
+  midnight, six characters from `23456789abcdefghjkmnpqrstuvwxyz`, zero-padded.
+  `{rand}` is removed; `[id] format` must contain `{time}`.
+- Ids written before this release (five random characters) no longer match the
+  format. `check` reports them; rename the directory and the `id:` field to a
+  current id if you keep such a project.
+- Invariant 13 no longer claims a random token. The time code is a label and a
+  sort key, not a coordination fact: two creators that stamp the same
+  millisecond get the same code, and `check` reports the duplicate id.
+
+### Added
+
+- `flowlib/stamp.py`: the clock read, the fixed-width code, and the per-process
+  allocator that never hands out a code twice.
+
+### Changed
+
+- `new` reads the clock once, so the date and the time code cannot straddle
+  midnight; a code collision bumps to the next millisecond instead of redrawing
+  a random token, and `new` also refuses a code already on disk.
+- `examples/minimal`, the profile template, and the bundled `go-service`
+  extension require `>=0.3.1,<0.4`.
+
 ## 0.3.0 — 2026-11-26
 
 Multi-person, multi-machine, and parallel-agent support. The flow no longer

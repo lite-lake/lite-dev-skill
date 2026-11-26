@@ -18,8 +18,8 @@ SIZES = ("S", "M", "L")
 PRIORITIES = ("P0", "P1", "P2", "P3")
 MODES = ("one-shot", "two-phase")
 LEVELS = ("l1", "l2", "l3")
-RAND_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
-RAND_LEN = 5
+TIME_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
+TIME_LEN = 6
 EXTENSION_KEYS = {"name", "version", "description", "requires", "commands", "gate", "docs", "reconcile"}
 
 
@@ -161,12 +161,12 @@ def _id_pattern(id_format: str) -> re.Pattern:
             parts.append(r"\d{8}")
         elif token == "{type}":
             parts.append(r"[A-Z]+")
-        elif token == "{rand}":
-            parts.append(f"[{RAND_ALPHABET}]{{{RAND_LEN}}}")
+        elif token == "{time}":
+            parts.append(f"[{TIME_ALPHABET}]{{{TIME_LEN}}}")
         elif token.startswith("{"):
             raise ProfileError(
                 f"[id] format has unknown placeholder {token}; "
-                "supported: {date}, {type}, {rand}"
+                "supported: {date}, {type}, {time}"
             )
         else:
             parts.append(re.escape(token))
@@ -351,10 +351,10 @@ def load(path: Path | str | None = None) -> Profile:
             raise ProfileError(f"[project] {label} must be relative to the project root")
 
     id_format = _require(id_table, "format", "[id]")
-    for token in ("{date}", "{type}", "{rand}"):
+    for token in ("{date}", "{type}", "{time}"):
         if token not in id_format:
             raise ProfileError(
-                f"[id] format must contain {{date}}, {{type}} and {{rand}}; got {id_format!r}"
+                f"[id] format must contain {{date}}, {{type}} and {{time}}; got {id_format!r}"
             )
 
     required_for = design.get("required_for", ["L"])
@@ -435,7 +435,7 @@ def load(path: Path | str | None = None) -> Profile:
 
     id_pattern = _id_pattern(id_format)
     try:
-        id_format.format(date="20000101", type="REQ", rand="abcde")
+        id_format.format(date="20000101", type="REQ", time="222222")
     except (KeyError, IndexError, ValueError) as exc:
         raise ProfileError(f"[id] format is invalid: {exc}") from exc
 

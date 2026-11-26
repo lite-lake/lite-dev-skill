@@ -21,8 +21,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import secrets
 import sys
+from datetime import datetime
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -41,14 +41,13 @@ from flowlib import (  # noqa: E402
     identity,
     reconcile,
     release,
+    stamp,
 )
 from flowlib import profile as profile_mod  # noqa: E402
 from flowlib.errors import FlowError  # noqa: E402
 from flowlib.profile import (  # noqa: E402
     MODES,
     PRIORITIES,
-    RAND_ALPHABET,
-    RAND_LEN,
     SIZES,
     TYPES,
     ProfileError,
@@ -84,22 +83,32 @@ def _slugify(title: str) -> str:
 
 
 ID_ATTEMPTS = 50
+_CLOCK = stamp.Clock()
 
 
-def _new_id(profile: profile_mod.Profile, item_type: str, created: str) -> str:
-    """Allocate an id that is unique across clones without coordination."""
+def _new_id(
+    profile: profile_mod.Profile, item_type: str, created: str, moment: datetime
+) -> str:
+    """Allocate the id for this moment, bumping the time code on collision."""
     existing = {item.id for item in artifacts.all_items(profile)}
     if profile.work_path.is_dir():
         existing.update(path.name for path in profile.work_path.iterdir() if path.is_dir())
+    ms = _CLOCK.allocate(created, moment)
     for _ in range(ID_ATTEMPTS):
-        token = "".join(secrets.choice(RAND_ALPHABET) for _ in range(RAND_LEN))
+        if ms >= stamp.MS_PER_DAY:
+            raise FlowError(
+                f"no id left in {created}: the clock is at the last millisecond of the day; "
+                "rerun after midnight"
+            )
         candidate = profile.id_format.format(
-            date=created.replace("-", ""), type=item_type, rand=token
+            date=created.replace("-", ""), type=item_type, time=stamp.encode(ms)
         )
         if candidate not in existing and not any(
             name == candidate or name.startswith(candidate + "-") for name in existing
         ):
+            _CLOCK.commit(created, ms)
             return candidate
+        ms += 1
     raise FlowError(
         f"cannot allocate an item id after {ID_ATTEMPTS} attempts; check [id] format"
     )
@@ -121,7 +130,8 @@ def cmd_new(args) -> int:
         raise FlowError("--mode must be one-shot or two-phase")
 
     owner = identity.resolve(profile.root, args.owner)
-    created = checks.today()
+    moment = stamp.now()
+    created = moment.date().isoformat()
     title = " ".join(args.title.split())
     slug = _slugify(title)
 
@@ -130,7 +140,7 @@ def cmd_new(args) -> int:
         directory = None
         item_id = ""
         for _ in range(5):
-            item_id = _new_id(profile, item_type, created)
+            item_id = _new_id(profile, item_type, created, moment)
             candidate = profile.work_path / (f"{item_id}-{slug}" if slug else item_id)
             try:
                 candidate.mkdir(parents=False, exist_ok=False)

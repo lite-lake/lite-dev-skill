@@ -108,17 +108,22 @@ partially mechanised.
 
 ## 13. Identity is collision-resistant and never guessed
 
-- Item ids are unique without coordination: a random token, not a local scan,
-  so two clones and two machines cannot allocate the same id.
+- Item ids are allocated without coordination: `{date}-{type}-{time}`, where
+  `{time}` is the millisecond of the local day. No clone pulls or scans before
+  `new`, and ids sort in creation order. Two allocations that stamp the same
+  millisecond collide; `new` bumps past a code already on disk, and `check`
+  reports a duplicate id rather than merging the two items.
 - Every item records its owner; the owner comes from an explicit identity, never
   from a machine's `user.name`.
-- A shared fact is derived from the commit graph or from the file name itself,
-  never from a local clock or directory order.
+- Shared facts that must agree across clones — release order, the watermark —
+  come from the commit graph, never from a local clock or directory order. The
+  id's time code is a label and a sort key, not a watermark.
 - Two matches for one id is an error, not a choice; so is an unreadable,
   stale, or forked release record.
-- **Enforced**: `new` allocates `{rand}`; `find_item` refuses an ambiguous id and
-  lists the candidates; `claim` records ownership; `release`/`reconcile` order
-  records by ancestry and stop on a broken chain.
+- **Enforced**: `new` allocates `{time}` and increments it on collision;
+  `find_item` refuses an ambiguous id and lists the candidates; `claim` records
+  ownership; `release`/`reconcile` order records by ancestry and stop on a
+  broken chain.
 
 ## Compatibility
 
