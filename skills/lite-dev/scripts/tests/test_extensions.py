@@ -159,7 +159,7 @@ class ExtensionTest(unittest.TestCase):
     def test_extensions_command(self) -> None:
         code, output = self.run_flow("extensions")
         self.assertEqual(code, 0)
-        self.assertIn("lite-dev 0.2.0", output)
+        self.assertIn("lite-dev 0.2.1", output)
         self.assertIn("demo 1.0.0", output)
         self.assertIn("gate l1 += demo_test", output)
 

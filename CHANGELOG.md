@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-11-26
 
 ### Changed
 
 - License changed from MIT to BSD 2-Clause. Updates `LICENSE`, the `license`
   field in `skills/lite-dev/SKILL.md`, and the license line in `README.md` and
   `README.zh.md`. No code or protocol change.
+- `__version__` is now `0.2.1`. `v0.2.0` stays as published, under MIT.
 
 ## Packaging — lite-dev-skill
 
