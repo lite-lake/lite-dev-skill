@@ -80,6 +80,7 @@ Phase A is the design session. Phase B is a scheduling session that dispatches
 ```bash
 python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
 python3 <skill>/scripts/flow.py status --mine
+python3 <skill>/scripts/flow.py status --stale [--days N]
 python3 <skill>/scripts/flow.py check [--work <ID>]
 python3 <skill>/scripts/flow.py design-ready <ID>
 python3 <skill>/scripts/flow.py gate --level l1 --work <ID>
@@ -88,7 +89,7 @@ python3 <skill>/scripts/flow.py done <ID>
 python3 <skill>/scripts/flow.py handoff <ID> [--batch Bx]
 python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
 python3 <skill>/scripts/flow.py whoami
-python3 <skill>/scripts/flow.py release --channel staging
+python3 <skill>/scripts/flow.py release --channel staging [--confirm "..."]
 python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```
@@ -97,15 +98,19 @@ python3 <skill>/scripts/flow.py extensions
   `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
   (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
   `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
-- `check` validates fields, AC, design rules, and document hygiene (links,
-  indexes, entry-document facts); `--work` limits it to one item.
+- `check` validates fields, AC, design rules, evidence, and document hygiene
+  (links, reachability, counts, decisions, exemptions); `--work` limits it to
+  one item. A partial test report is a warning while the item is open.
 - `design-ready` refuses an incomplete design and writes `status: ready`.
 - `gate` validates the item under `--work` (or the whole project), then runs the
   profile's commands for a level.
 - `claim` reassigns the owner; commit it so teammates see the change. Another
   person's open item needs `--takeover`.
-- `done` refuses unchecked AC and a missing required design; it records
-  `closed_by` and warns when the closer is not the owner.
+- `done` refuses unchecked AC, a missing required design, a designed item
+  without `test-report.md`, a verdict other than PASS, and an AC with no
+  evidence row. It records `closed_by` and warns when the closer is not the owner.
+- `status --stale` lists open items nobody has touched for more than `--days`
+  (default 30), derived from git; it reports and exits 0.
 - `handoff` prints a cold-start prompt built from the artifacts: paths, the
   handoff summary, batch progress, the next batch, the gate command. Use it at a
   session boundary instead of retyping context; `--batch` prints the implement
@@ -127,6 +132,10 @@ candidates listed: use the full id, never guess.
 - A release record is written only by `release --record`. It runs `check`, runs
   the configured `release.gate_level`, and refuses a dirty tree, a channel
   branch, an empty `--rollback`, or undocumented no-work-item commits.
+- With `[release] confirm_risk_paths`, a source range that touches
+  `[design] risk_paths` needs `--confirm "<the human's words>"`; the record then
+  names who authorised it. Prose in the record is the point: a rollback answers
+  "how do we undo it", confirmation answers "who said we may".
 - Commits without work items are allowed. Write the debt into `--note`; never
   fabricate a work item to make the report green.
 - `reconcile` is advisory and exits 0. It is not an approval gate.
@@ -173,8 +182,9 @@ batch the main branch builds and passes the gate.
 ## 8. Independent verification
 
 Implement and verify in different contexts. The verifier reads the AC and the
-change, not the implementer's rationale. Evidence goes into `test-report.md`.
-An implementer saying "tested" is not evidence.
+change, not the implementer's rationale. Evidence goes into `test-report.md`:
+one row per AC with the command and its output. An implementer saying "tested"
+is not evidence, and `done` refuses a designed item without a passing report.
 
 ## 9. Stop conditions (ask the human)
 
@@ -192,6 +202,9 @@ An implementer saying "tested" is not evidence.
 - Writing `design.md` before the human agrees, or asking for a second review after agreement.
 - Writing a status by hand.
 - Skipping the gate, or calling a checklist "tested".
+- Closing a designed item without a passing `test-report.md`, or filling an
+  evidence cell with a placeholder.
+- Recording a release over a risk path without the confirmation the profile asks for.
 - Recording a release without `--record`, with a dirty tree, or with hidden debt.
 - Letting an extension weaken a rule instead of adding one.
 - A verifier approving their own implementation.

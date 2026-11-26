@@ -91,6 +91,38 @@ class AcceptanceTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def write_report(self, directory: Path) -> None:
+        (directory / "test-report.md").write_text(
+            f"""\
+---
+item: {item_id(directory)}
+batch: B2
+---
+
+## Scope
+
+- Batch: B2
+- What was verified: AC01 and AC02
+
+## Result
+
+- Verdict: PASS
+- Reason: acceptance run
+
+## Evidence
+
+| AC | Command | Output / artefact |
+|---|---|---|
+| AC01 | python3 -m unittest discover -s tests -q | OK |
+| AC02 | python3 -m unittest discover -s tests -q | OK |
+
+## Defects
+
+- None
+""",
+            encoding="utf-8",
+        )
+
     def test_full_loop(self) -> None:
         status = self.run_flow("status")
         self.assertEqual(status.returncode, 0)
@@ -161,6 +193,11 @@ class AcceptanceTest(unittest.TestCase):
         self.assertEqual(lgate.returncode, 0, lgate.stdout)
 
         self.tick_all_ac(large)
+        early = self.run_flow("done", large_id)
+        self.assertEqual(early.returncode, 1)
+        self.assertIn("requires test-report.md", early.stdout)
+
+        self.write_report(large)
         ldone = self.run_flow("done", large_id)
         self.assertEqual(ldone.returncode, 0, ldone.stdout)
 

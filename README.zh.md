@@ -108,11 +108,13 @@ examples/minimal/           可直接跑的单仓库示例项目
 | frontmatter / AC / 批次解析 | 设计叙述与图示 |
 | 状态推导 | 批次拆分 |
 | 必填字段、链接、AC↔批次↔验证 | 代码与测试 |
+| 证据完整性（每个 AC 一行命令与输出、结论） | 证据是否充分 |
 | 设计门禁（确认、回滚、缺口） | 故障诊断 |
 | 执行 profile 命令、退出码 | 黑盒验收判断 |
 | 按提交图排序的发布链 | 部署判断 |
 | 从产物拼出交接提示词 | 下一步该做什么的判断 |
-| 文档可达性、索引覆盖、入口文档的事实 | 文字是否属实 |
+| 文档可达性、索引图连通、入口文档的事实 | 文字是否属实 |
+| 决策链、豁免到期、条目停滞（git 推导） | 哪些东西该清理或重审 |
 | 风险路径的设计门、本克隆的门禁新鲜度 | 改动实际有多险 |
 
 线左边一律交给脚本，因为 Agent 自己汇报这类事总是失真；
@@ -130,13 +132,15 @@ examples/minimal/           可直接跑的单仓库示例项目
 ```bash
 flow.py release --channel staging      # 只出计划：门禁、提交、欠账、记录路径
 flow.py release --channel staging --record --rollback "..." --note "..."
+flow.py release --channel staging --record --rollback "..." --confirm "..."
 flow.py reconcile                      # 建议性欠账报告，永不阻断
 flow.py extensions                     # 每个扩展贡献了什么
 ```
 
 `--record` 会自己跑门禁，之前跑过不算证据。它会拒绝脏工作树、非 `release.mainline`
 分支、空的回滚说明、不是已记录 tip 后代的 source，以及没有写进 `--note` 的无工作项
-提交。
+提交。profile 打开 `[release] confirm_risk_paths` 后，触及 `[design] risk_paths` 的
+发布范围还需要 `--confirm`，记录里会留下谁批准的。
 
 扩展是声明式、只加不减的：命令、门禁步骤、必需文档、风险路径。加载器拒绝命令冲突、
 未知键和与 `requires` 不兼容的版本区间。随 skill 分发的扩展可以自带脚本，并在命令里
@@ -171,10 +175,12 @@ flow.py extensions                     # 每个扩展贡献了什么
 
 ## 状态
 
-当前版本已实现 `new`、`claim`、`whoami`、`status`、`check`、`design-ready`、`gate`、
-`done`、`handoff`、`archive`、`unarchive`、`release`、`reconcile`、`extensions`，模板
-（含 `decision.md`）、不变量文档、文档卫生检查、风险路径设计门、按克隆记录的门禁
-账本、三个随附扩展，以及可运行的单仓库示例。计划中：多仓库 workspace profile。
+当前版本已实现 `new`、`claim`、`whoami`、`status`（含 `--stale`）、`check`、
+`design-ready`、`gate`、`done`、`handoff`、`archive`、`unarchive`、`release`、
+`reconcile`、`extensions`，模板（含 `decision.md`）、不变量文档、文档卫生检查、
+索引图连通、决策链、带到期日的豁免台账、证据完整性校验（`done` 拒绝设计项缺少通过
+的测试报告）、风险路径设计门、按克隆记录的门禁账本、三个随附扩展，以及可运行的
+单仓库示例。计划中：多仓库 workspace profile。
 
 版本与破坏性变更见 `CHANGELOG.md`（[中文](CHANGELOG.zh.md)）。
 

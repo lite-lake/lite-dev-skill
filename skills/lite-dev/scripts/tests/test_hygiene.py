@@ -42,7 +42,7 @@ required = ["README.md", "docs/README.md"]
 {extra_docs}
 [release]
 dir = "docs/releases"
-"""
+{extra_root}"""
 
 ITEM = """\
 ---
@@ -80,7 +80,7 @@ class HygieneTest(unittest.TestCase):
         self.profile_path = self.root / "docs/flow/profile.toml"
         self.write("README.md", "# project\n\nSee [docs](docs/README.md).\n")
         self.write("docs/README.md", "# docs\n")
-        self.write("docs/flow/profile.toml", PROFILE.format(extra_docs=""))
+        self.write("docs/flow/profile.toml", PROFILE.format(extra_docs="", extra_root=""))
         self.item_dir = self.root / "docs/work/2026-11" / SLUG
         self.write_item(closed="")
 
@@ -142,16 +142,172 @@ class HygieneTest(unittest.TestCase):
         self.assertIn("duplicate '## Gate'", output)
 
     def test_decisions_directory_must_exist_and_be_indexed(self) -> None:
-        self.write("docs/flow/profile.toml", PROFILE.format(extra_docs="decisions = \"docs/decisions\"\n"))
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.format(extra_docs='decisions = "docs/decisions"\n', extra_root=""),
+        )
         code, output = self.run_flow("check")
         self.assertEqual(code, 1)
         self.assertIn("missing directory: docs/decisions", output)
 
         self.write("docs/decisions/README.md", "# Decisions\n")
-        self.write("docs/decisions/ADR-0001-why.md", "# Why\n")
+        self.write(
+            "docs/decisions/ADR-0001-why.md",
+            "# Why\n\n- Status: accepted\n- Date: 2026-11-01\n",
+        )
         code, output = self.run_flow("check")
         self.assertEqual(code, 0, output)
         self.assertIn("ADR-0001-why.md: not linked from docs/decisions/README.md", output)
+
+    def enable_decisions(self) -> None:
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.format(extra_docs='decisions = "docs/decisions"\n', extra_root=""),
+        )
+
+    def set_profile(self, extra_root: str = "", extra_docs: str = "") -> None:
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.format(extra_docs=extra_docs, extra_root=extra_root),
+        )
+
+    def test_exemption_silences_one_check_on_one_path(self) -> None:
+        self.set_profile(
+            extra_root=(
+                '[[exempt]]\ncheck = "links"\npath = "docs/legacy"\n'
+                'reason = "imported handbook"\nuntil = "2999-01-01"\n'
+            )
+        )
+        self.write("docs/legacy/README.md", "# legacy\n\n[gone](missing.md)\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("link target does not exist", output)
+
+    def test_an_expired_exemption_silences_nothing(self) -> None:
+        self.set_profile(
+            extra_root=(
+                '[[exempt]]\ncheck = "links"\npath = "docs/legacy"\n'
+                'reason = "imported handbook"\nuntil = "2000-01-01"\n'
+            )
+        )
+        self.write("docs/legacy/README.md", "# legacy\n\n[gone](missing.md)\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 1)
+        self.assertIn("expired on 2000-01-01", output)
+        self.assertIn("link target does not exist", output)
+
+    def test_an_exemption_that_suppresses_nothing_is_reported(self) -> None:
+        self.set_profile(
+            extra_root=(
+                '[[exempt]]\ncheck = "links"\npath = "docs/nowhere"\n'
+                'reason = "stale exception"\nuntil = "2999-01-01"\n'
+            )
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("matched no issue", output)
+
+    def test_an_exemption_needs_a_reason_and_a_date(self) -> None:
+        self.set_profile(
+            extra_root='[[exempt]]\ncheck = "links"\npath = "docs/legacy"\n'
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 2)
+        self.assertIn("'reason' is required", output)
+
+    def test_an_unreachable_directory_index_is_reported(self) -> None:
+        self.write("docs/guide/README.md", "# guide\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn(
+            "docs/guide/README.md: index is not reachable from docs/README.md", output
+        )
+
+        self.write("docs/README.md", "# docs\n\n[guide](guide/README.md)\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("is not reachable from docs/README.md", output)
+
+    def test_a_directory_without_a_readme_is_reported(self) -> None:
+        self.write("docs/notes/a.md", "# a\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("docs/notes/: has markdown files but no README.md", output)
+
+        self.set_profile(
+            extra_root=(
+                '[[exempt]]\ncheck = "index"\npath = "docs/notes"\n'
+                'reason = "generated notes"\nuntil = "2999-01-01"\n'
+            )
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("has markdown files but no README.md", output)
+
+    def test_entry_document_counts_are_a_zero_fact(self) -> None:
+        self.write("README.md", "# project\n\nIt ships 3 services.\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("hardcodes a count (3 services)", output)
+
+    def test_a_superseded_decision_must_name_its_successor(self) -> None:
+        self.enable_decisions()
+        self.write(
+            "docs/decisions/README.md",
+            "# Decisions\n\n[a](ADR-0001-a.md)\n[b](ADR-0002-b.md)\n",
+        )
+        self.write(
+            "docs/decisions/ADR-0001-a.md",
+            "# A\n\n- Status: superseded\n- Superseded by: ADR-0002-b.md\n",
+        )
+        self.write(
+            "docs/decisions/ADR-0002-b.md",
+            "# B\n\n- Status: accepted\n- Supersedes: ADR-0001-a.md\n",
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+
+        self.write(
+            "docs/decisions/ADR-0001-a.md",
+            "# A\n\n- Status: superseded\n- Superseded by: ADR-9999-gone.md\n",
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 1)
+        self.assertIn("does not name a decision", output)
+
+    def test_a_decision_supersede_cycle_is_an_error(self) -> None:
+        self.enable_decisions()
+        self.write(
+            "docs/decisions/README.md",
+            "# Decisions\n\n[a](ADR-0001-a.md)\n[b](ADR-0002-b.md)\n",
+        )
+        self.write(
+            "docs/decisions/ADR-0001-a.md",
+            "# A\n\n- Status: superseded\n- Superseded by: ADR-0002-b.md\n",
+        )
+        self.write(
+            "docs/decisions/ADR-0002-b.md",
+            "# B\n\n- Status: superseded\n- Superseded by: ADR-0001-a.md\n",
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 1)
+        self.assertIn("supersede chain cycles", output)
+
+    def test_a_decision_status_is_an_enum(self) -> None:
+        self.enable_decisions()
+        self.write("docs/decisions/README.md", "# Decisions\n\n[a](ADR-0001-a.md)\n")
+        self.write("docs/decisions/ADR-0001-a.md", "# A\n\n- Status: decided\n")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 1)
+        self.assertIn("must be one of", output)
+
+        self.write(
+            "docs/decisions/ADR-0001-a.md",
+            "# A\n\n- Status: accepted\n- Superseded by: ADR-0001-a.md\n",
+        )
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 1)
+        self.assertIn("names a successor but status is 'accepted'", output)
 
     def test_archive_refuses_an_open_item(self) -> None:
         code, output = self.run_flow("archive", ITEM_ID)

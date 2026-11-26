@@ -10,6 +10,7 @@ dir = "docs/releases"
 gate_level = "l3"        # must exist in [gate]
 mainline = "main"        # required once a channel exists
 require_artifacts = false
+confirm_risk_paths = false   # opt-in: a structural range needs --confirm
 ```
 
 ## Commands
@@ -21,6 +22,9 @@ flow.py release --channel staging --record \
   --rollback "redeploy <previous tag>" \
   --artifact "app@sha256:..." \
   --note "two chore commits have no work item"
+flow.py release --channel prod --record \
+  --rollback "redeploy <previous tag>" \
+  --confirm "ops approved the schema change on 2026-11-26"
 ```
 
 `--record` is the only way to write a release. It enforces, in order:
@@ -32,7 +36,10 @@ flow.py release --channel staging --record \
 4. The channel's records form one unbroken chain, and HEAD descends from its tip.
 5. `--rollback` is non-empty; `--artifact` is present when the profile requires it.
 6. Commits without work items are written into `--note`.
-7. `gate_level` passes: FAIL means no record. The gate runs inside `--record`;
+7. With `confirm_risk_paths`, a range that touches `[design] risk_paths` has
+   `--confirm`; the record's `## Authorization` then names the human and keeps
+   their words verbatim.
+8. `gate_level` passes: FAIL means no record. The gate runs inside `--record`;
    a previous run is not evidence.
 
 The recorder and the tool version are stored in the record (`by`, `tool`).

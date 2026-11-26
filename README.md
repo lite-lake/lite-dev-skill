@@ -115,11 +115,13 @@ examples/minimal/           a working single-repo project
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
 | required fields, links, AC↔batch↔verification | code and tests |
+| evidence completeness (one command and output per AC, verdict) | whether the evidence is sufficient |
 | design gate (confirmation, rollback, gaps) | failure diagnosis |
 | running profile commands, exit codes | black-box acceptance judgement |
 | release chain ordered by commit ancestry | deployment judgement |
 | handoff prompt assembled from the artifacts | the judgement behind the next step |
-| document reachability, index coverage, entry-document pins | whether the prose is true |
+| document reachability, index-graph connectivity, entry-document pins | whether the prose is true |
+| decision chains, exemption expiry, item staleness from git | what should be cleaned up or re-reviewed |
 | risk-path design gate, per-clone gate freshness | how risky a change actually is |
 
 Anything left of the line is a script because agents self-report it badly.
@@ -139,6 +141,7 @@ Anything right of the line is prose because a script would get it wrong.
 ```bash
 flow.py release --channel staging      # plan: gate, commits, debt, record path
 flow.py release --channel staging --record --rollback "..." --note "..."
+flow.py release --channel staging --record --rollback "..." --confirm "..."
 flow.py reconcile                      # advisory debt report; never blocks
 flow.py extensions                     # what each add-on contributes
 ```
@@ -146,7 +149,9 @@ flow.py extensions                     # what each add-on contributes
 `--record` runs the gate itself; a previous run is not evidence. It refuses a
 dirty tree, a branch other than `release.mainline`, an empty rollback, a source
 that does not descend from the recorded tip, or commits without work items that
-are not written into `--note`.
+are not written into `--note`. With `[release] confirm_risk_paths`, a range that
+touches `[design] risk_paths` also needs `--confirm`: the record keeps the
+human's words, not only the rollback.
 
 Extensions are declarative and additive: commands, gate steps, required docs,
 risk paths. The loader rejects command collisions, unknown keys, and an
@@ -190,12 +195,14 @@ Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 
 ## Status
 
-The current release implements `new`, `claim`, `whoami`, `status`, `check`,
-`design-ready`, `gate`, `done`, `handoff`, `archive`, `unarchive`, `release`,
-`reconcile`, `extensions`, the templates (including `decision.md`), the
-invariants, document hygiene checks, the risk-path design gate, the per-clone
-gate ledger, three bundled extensions, and a runnable single-repo example.
-Planned: a multi-repo workspace profile.
+The current release implements `new`, `claim`, `whoami`, `status` (with
+`--stale`), `check`, `design-ready`, `gate`, `done`, `handoff`, `archive`,
+`unarchive`, `release`, `reconcile`, `extensions`, the templates (including
+`decision.md`), the invariants, document hygiene checks, index-graph
+connectivity, decision chains, the expiring exemption ledger, evidence
+completeness (`done` refuses a designed item without a passing test report), the
+risk-path design gate, the per-clone gate ledger, three bundled extensions, and a
+runnable single-repo example. Planned: a multi-repo workspace profile.
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

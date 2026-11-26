@@ -9,6 +9,7 @@ import re
 import shlex
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from . import __version__
@@ -24,10 +25,23 @@ LEVELS = ("l1", "l2", "l3")
 TIME_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 TIME_LEN = 6
 EXTENSION_KEYS = {"name", "version", "description", "requires", "commands", "gate", "docs", "reconcile"}
+# Checks an exemption may silence. Evidence is deliberately absent: an exemption
+# records drift, it does not waive an invariant.
+EXEMPT_CHECKS = ("links", "index", "artifact", "archive_link", "zero_fact", "heading")
 
 
 class ProfileError(Exception):
     """The profile or one of its extensions is missing or inconsistent."""
+
+
+@dataclass
+class Exemption:
+    """A bounded silence: one check, one path, a reason, and an expiry date."""
+
+    check: str
+    path: str
+    reason: str
+    until: str
 
 
 @dataclass
@@ -51,11 +65,13 @@ class Profile:
     docs_check_links: bool
     docs_zero_fact: bool
     docs_decisions: str
+    exemptions: list[Exemption]
     release_channels: list[str]
     release_dir: str
     release_gate_level: str
     release_mainline: str
     release_require_artifacts: bool
+    release_confirm_risk_paths: bool
     risk_paths: list[str]
     gate_fallback_paths: list[str]
     gate_fresh_days: int
@@ -116,6 +132,49 @@ def _allow_keys(table: dict, allowed: tuple[str, ...], where: str) -> None:
     unknown = set(table) - set(allowed)
     if unknown:
         raise ProfileError(f"{where}: unknown key(s) {', '.join(sorted(unknown))}")
+
+
+def _exemptions(value) -> list[Exemption]:
+    """Parse `[[exempt]]`: a check, a path prefix, a reason, and an expiry.
+
+    A silence without a reason or an end date is the failure this replaces: the
+    old `check_links = false` switch silenced the whole project forever. Every
+    field is required, and `check` reports an expired entry instead of honouring
+    it, so the exemption cannot outlive the reason for it.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ProfileError("[[exempt]] must be an array of tables")
+    result: list[Exemption] = []
+    seen: set[tuple[str, str]] = set()
+    for index, entry in enumerate(value, 1):
+        where = f"[[exempt]] #{index}"
+        if not isinstance(entry, dict):
+            raise ProfileError(f"{where} must be a table")
+        _allow_keys(entry, ("check", "path", "reason", "until"), where)
+        for key in ("check", "path", "reason", "until"):
+            if not isinstance(entry.get(key), str) or not entry[key].strip():
+                raise ProfileError(f"{where}: '{key}' is required and must be a non-empty string")
+        check = entry["check"].strip()
+        if check not in EXEMPT_CHECKS:
+            raise ProfileError(
+                f"{where}: unknown check '{check}'; use one of {', '.join(EXEMPT_CHECKS)}"
+            )
+        path = entry["path"].strip().rstrip("/")
+        if Path(path).is_absolute():
+            raise ProfileError(f"{where}: 'path' must be relative to the project root")
+        until = entry["until"].strip()
+        try:
+            date.fromisoformat(until)
+        except ValueError as exc:
+            raise ProfileError(f"{where}: 'until' must be a date, e.g. 2027-03-31") from exc
+        key = (check, path)
+        if key in seen:
+            raise ProfileError(f"{where}: duplicate exemption for {check} on {path}")
+        seen.add(key)
+        result.append(Exemption(check=check, path=path, reason=entry["reason"].strip(), until=until))
+    return result
 
 
 def _parse_version(text: str) -> tuple[int, int, int]:
@@ -374,7 +433,16 @@ def load(path: Path | str | None = None) -> Profile:
     )
     _allow_keys(docs, ("required", "check_links", "zero_fact", "decisions"), "[docs]")
     _allow_keys(
-        release, ("channels", "dir", "gate_level", "mainline", "require_artifacts"), "[release]"
+        release,
+        (
+            "channels",
+            "dir",
+            "gate_level",
+            "mainline",
+            "require_artifacts",
+            "confirm_risk_paths",
+        ),
+        "[release]",
     )
     _allow_keys(reconcile, ("risk_paths",), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
@@ -458,6 +526,15 @@ def load(path: Path | str | None = None) -> Profile:
     release_require_artifacts = release.get("require_artifacts", False)
     if not isinstance(release_require_artifacts, bool):
         raise ProfileError("[release] require_artifacts must be true or false")
+    release_confirm_risk_paths = release.get("confirm_risk_paths", False)
+    if not isinstance(release_confirm_risk_paths, bool):
+        raise ProfileError("[release] confirm_risk_paths must be true or false")
+    if release_confirm_risk_paths and not design_risk_paths:
+        raise ProfileError(
+            "[release] confirm_risk_paths needs [design] risk_paths; "
+            "nothing would ever require confirmation"
+        )
+    exemptions = _exemptions(raw.get("exempt"))
 
     requires = _require(flow_table, "requires", "[flow]").strip()
     if not requires:
@@ -529,11 +606,13 @@ def load(path: Path | str | None = None) -> Profile:
         docs_check_links=docs_check_links,
         docs_zero_fact=docs_zero_fact,
         docs_decisions=docs_decisions,
+        exemptions=list(exemptions),
         release_channels=list(release_channels),
         release_dir=release_dir,
         release_gate_level=release_gate_level,
         release_mainline=release_mainline,
         release_require_artifacts=release_require_artifacts,
+        release_confirm_risk_paths=release_confirm_risk_paths,
         risk_paths=list(risk_paths),
         gate_fallback_paths=list(gate_fallback_paths),
         gate_fresh_days=gate_fresh_days,

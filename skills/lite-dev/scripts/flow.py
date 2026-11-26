@@ -2,7 +2,7 @@
 """lite-dev flow tool.
 
 Usage (from the project root):
-    python3 <skill>/scripts/flow.py status [--mine]
+    python3 <skill>/scripts/flow.py status [--mine] [--stale [--days N]]
     python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
     python3 <skill>/scripts/flow.py check [--work <ID>]
     python3 <skill>/scripts/flow.py design-ready <ID>
@@ -13,7 +13,7 @@ Usage (from the project root):
     python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
     python3 <skill>/scripts/flow.py unarchive <ID>
     python3 <skill>/scripts/flow.py whoami
-    python3 <skill>/scripts/flow.py release --channel staging
+    python3 <skill>/scripts/flow.py release --channel staging [--confirm "..."]
     python3 <skill>/scripts/flow.py reconcile
     python3 <skill>/scripts/flow.py extensions
 
@@ -26,7 +26,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -214,6 +214,79 @@ def _checkout(profile: profile_mod.Profile) -> dict | None:
         return None
 
 
+def _stale_rows(
+    profile: profile_mod.Profile, items: list[artifacts.Item], days: int
+) -> tuple[list[dict], str]:
+    """Open items nobody has touched for a while, derived from git.
+
+    The date is the latest commit that touched anything in the item directory;
+    an uncommitted item falls back to its `created` date. This is a report, not
+    a state: nothing is written and nothing is blocked.
+    """
+    today = date.today()
+    dates: dict[str, str] = {}
+    note = ""
+    try:
+        if git.is_repo(profile.root):
+            dates = git.activity_dates(profile.root, profile.work_dir)
+        else:
+            note = "not a git repository; using created dates"
+    except git.GitError:
+        note = "git is unavailable; using created dates"
+
+    rows: list[dict] = []
+    for item in items:
+        if (item.meta.get("closed") or "").strip():
+            continue
+        relative = item.directory.relative_to(profile.root).as_posix()
+        last = dates.get(relative) or (item.meta.get("created") or "").strip()
+        if not last:
+            continue
+        try:
+            age = (today - date.fromisoformat(last)).days
+        except ValueError:
+            continue
+        if age <= days:
+            continue
+        started = any(
+            artifacts.row_value(row, "Status", "状态").strip().lower()
+            in {"doing", "done", "进行中", "完成"}
+            for row in item.progress
+        )
+        marker = (
+            " (design ready, no batch started)"
+            if item.design_status == "ready" and not started
+            else ""
+        )
+        rows.append(
+            {
+                "id": item.id,
+                "status": item.status,
+                "owner": item.meta.get("owner", ""),
+                "last": last,
+                "days": age,
+                "note": marker.strip(),
+            }
+        )
+    rows.sort(key=lambda row: row["days"], reverse=True)
+    return rows, note
+
+
+def _print_stale(rows: list[dict], note: str, days: int) -> None:
+    if rows:
+        print(f"\nstale open items (>{days} days, last commit or created):")
+        for row in rows:
+            tail = f"  {row['note']}" if row["note"] else ""
+            print(
+                f"  {row['id']}  {row['status']}  {row['owner'] or '-'}  "
+                f"{row['days']}d  {row['last']}{tail}"
+            )
+    else:
+        print(f"\nstale: none older than {days} days")
+    if note:
+        print(f"  ({note})")
+
+
 def cmd_status(args) -> int:
     profile = _load_profile(args)
     items = artifacts.all_items(profile)
@@ -231,43 +304,48 @@ def cmd_status(args) -> int:
     items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
     full = profile.full_level
     stale = gate_log.stale_line(profile, full) if full else None
+    stale_rows: list[dict] = []
+    stale_note = ""
+    if args.stale:
+        stale_rows, stale_note = _stale_rows(profile, items, args.days)
 
     if args.json:
-        print(
-            json.dumps(
+        payload = {
+            "project": profile.name,
+            "profile": str(profile.path.relative_to(profile.root)),
+            "checkout": checkout,
+            "mine": mine or None,
+            "gate": {"full": full, "stale": stale},
+            "items": [
                 {
-                    "project": profile.name,
-                    "profile": str(profile.path.relative_to(profile.root)),
-                    "checkout": checkout,
-                    "mine": mine or None,
-                    "gate": {"full": full, "stale": stale},
-                    "items": [
-                        {
-                            "id": item.id,
-                            "title": item.meta.get("title", ""),
-                            "type": item.meta.get("type", ""),
-                            "size": item.size,
-                            "mode": item.mode,
-                            "status": item.status,
-                            "owner": item.meta.get("owner", ""),
-                            "closed_by": item.meta.get("closed_by", ""),
-                            "ac_done": item.ac_done,
-                            "ac_total": item.ac_total,
-                            "design": (
-                                "ready"
-                                if item.design_status == "ready"
-                                else ("draft" if item.design_path else "")
-                            ),
-                            "path": str(item.directory.relative_to(profile.root)),
-                        }
-                        for item in items
-                    ],
-                    "counts": {key: counts[key] for key in STATUS_ORDER if key in counts},
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+                    "id": item.id,
+                    "title": item.meta.get("title", ""),
+                    "type": item.meta.get("type", ""),
+                    "size": item.size,
+                    "mode": item.mode,
+                    "status": item.status,
+                    "owner": item.meta.get("owner", ""),
+                    "closed_by": item.meta.get("closed_by", ""),
+                    "ac_done": item.ac_done,
+                    "ac_total": item.ac_total,
+                    "design": (
+                        "ready"
+                        if item.design_status == "ready"
+                        else ("draft" if item.design_path else "")
+                    ),
+                    "path": str(item.directory.relative_to(profile.root)),
+                }
+                for item in items
+            ],
+            "counts": {key: counts[key] for key in STATUS_ORDER if key in counts},
+        }
+        if args.stale:
+            payload["stale"] = {
+                "days": args.days,
+                "items": stale_rows,
+                "note": stale_note or None,
+            }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
@@ -288,6 +366,8 @@ def cmd_status(args) -> int:
             print(f"{archived} archived (flow.py archive --help)")
         if stale:
             print(f"\nwarn: {stale}")
+        if args.stale:
+            _print_stale(stale_rows, stale_note, args.days)
         return 0
 
     rows = []
@@ -321,6 +401,8 @@ def cmd_status(args) -> int:
         print(f"{archived} archived (flow.py archive --help)")
     if stale:
         print(f"\nwarn: {stale}")
+    if args.stale:
+        _print_stale(stale_rows, stale_note, args.days)
 
     next_lines = []
     for item in items:
@@ -441,6 +523,27 @@ def cmd_gate(args) -> int:
         return 2
 
 
+def _mention_evidence(path: Path) -> None:
+    """Link the test report from item.md so the next session finds the evidence.
+
+    `done` has just validated the report. Recording the pointer is the same kind
+    of bookkeeping as `closed` and `closed_by`; without it every closed designed
+    item would carry an "artifact never mentioned" warning forever.
+    """
+    if not (path.parent / "test-report.md").is_file():
+        return
+    text = artifacts.read_text(path)
+    if "test-report.md" in text:
+        return
+    line = "- Evidence: test-report.md"
+    match = re.search(r"^##[ \t]+Notes[ \t]*$", text, re.M)
+    if match:
+        text = text[: match.end()] + f"\n\n{line}" + text[match.end():]
+    else:
+        text = text.rstrip() + f"\n\n## Notes\n\n{line}\n"
+    fsio.atomic_write_text(path, text)
+
+
 def cmd_done(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
@@ -457,11 +560,21 @@ def cmd_done(args) -> int:
         errors.append(f"unchecked AC: {open_ids}")
     if item.size in profile.design_required_for and item.design_status != "ready":
         errors.append(f"size {item.size} needs a ready design before it can be done")
+    report = item.directory / "test-report.md"
+    if item.design_path is not None and not report.is_file():
+        errors.append(
+            f"{item.directory.name}: done requires test-report.md for a designed item; "
+            "the AC tick is a claim, not evidence"
+        )
+    evidence_errors, evidence_warnings = checks.evidence_problems(item, strict=True)
+    errors.extend(evidence_errors)
     if errors:
         print("FAIL: cannot close the work item")
         for error in errors:
             print(f"  - {error}")
         return 1
+    for warning in evidence_warnings:
+        print(f"warn: {warning}")
 
     owner = (item.meta.get("owner") or "").strip()
     if closer and owner and not identity.same(owner, closer[0]):
@@ -479,6 +592,7 @@ def cmd_done(args) -> int:
         if closer:
             updates["closed_by"] = closer[0]
         artifacts.set_frontmatter_values(current.path, updates)
+        _mention_evidence(current.path)
     print(f"done {item.id} ({checks.today()})")
     print(f"  AC {item.ac_done}/{item.ac_total}")
     print(f"  design: {item.design_status or '-'}")
@@ -589,6 +703,11 @@ def cmd_release(args) -> int:
         since = args.since or (previous.source if previous else None)
         commits = git.commits(profile.root, since)
         debt = reconcile.collect(profile, channel, since)
+        risk_touched = (
+            checks.risk_paths_touched(profile, git.files_in_range(profile.root, since))
+            if profile.release_confirm_risk_paths
+            else []
+        )
     except git.GitError as exc:
         print(f"error: {exc}")
         return 2
@@ -610,6 +729,14 @@ def cmd_release(args) -> int:
             f"debt: {len(debt.no_item) + len(debt.missing_item)} commit(s) without a "
             "work item; --note is required to record"
         )
+    if profile.release_confirm_risk_paths:
+        if risk_touched:
+            print(
+                f"risk paths: {len(risk_touched)} touched; --confirm is required to record "
+                "(the profile sets [release] confirm_risk_paths = true)"
+            )
+        else:
+            print("risk paths: none touched; no confirmation required")
 
     if not args.record:
         print(f"\n{reconcile.render(debt, root=profile.root, verbose=args.verbose)}")
@@ -646,6 +773,15 @@ def cmd_release(args) -> int:
             "there are commits without work items; record the debt in --note "
             "(do not fabricate history)"
         )
+    confirm_text = (args.confirm or "").strip()
+    if risk_touched and not confirm_text:
+        listed = ", ".join(risk_touched[:3]) + (
+            f" (+{len(risk_touched) - 3} more)" if len(risk_touched) > 3 else ""
+        )
+        errors.append(
+            f"this release touches a risk path ({listed}); "
+            "pass --confirm \"<the human's words>\" to record who authorized it"
+        )
     static_errors, static_warnings = checks.check_project(profile)
     if static_errors:
         errors.extend(f"check: {error}" for error in static_errors)
@@ -669,6 +805,15 @@ def cmd_release(args) -> int:
         return 1
     gate_log.record(profile, profile.release_gate_level, True, item="release")
 
+    if risk_touched or confirm_text:
+        authorization = (
+            f"- Required: {'yes' if risk_touched else 'no'}\n"
+            f"- Confirmed by: {by if confirm_text else '-'}\n"
+            f"- Note: {confirm_text or 'None'}"
+        )
+    else:
+        authorization = "None"
+
     record = release.render(
         channel=channel,
         day=day,
@@ -681,6 +826,7 @@ def cmd_release(args) -> int:
         items=_item_text(profile, commits),
         artifacts_text="\n".join(f"- {item}" for item in artifact_list) or "None",
         rollback=args.rollback.strip(),
+        authorization=authorization,
         notes=(args.note or "None").strip(),
     )
     with fsio.project_lock(profile.root):
@@ -819,6 +965,14 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status", help="show derived status for all items")
     add_common(status_parser)
     status_parser.add_argument("--mine", action="store_true", help="only items owned by you")
+    status_parser.add_argument(
+        "--stale",
+        action="store_true",
+        help="list open items untouched for more than --days (derived from git)",
+    )
+    status_parser.add_argument(
+        "--days", type=int, default=30, help="staleness threshold in days (default 30)"
+    )
     status_parser.add_argument("--json", action="store_true", help="machine-readable output")
     status_parser.set_defaults(func=cmd_status)
 
@@ -868,6 +1022,10 @@ def build_parser() -> argparse.ArgumentParser:
     release_parser.add_argument("--channel", help="release channel; omit to list channels")
     release_parser.add_argument("--record", action="store_true", help="run the gate and write a record")
     release_parser.add_argument("--rollback", help="rollback target and steps (required with --record)")
+    release_parser.add_argument(
+        "--confirm",
+        help="the human's authorization, recorded when the range touches a risk path",
+    )
     release_parser.add_argument("--note", help="accepted debt and other release notes")
     release_parser.add_argument("--artifact", action="append", help="artefact reference; repeatable")
     release_parser.add_argument("--by", help="who records the release (defaults to your identity)")

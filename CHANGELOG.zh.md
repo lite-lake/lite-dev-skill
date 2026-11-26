@@ -2,6 +2,48 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.3.6 — 2026-11-26
+
+证据、可达性和「有边界的沉默」变成检查：`done` 拒绝没有通过测试报告的设计项，
+`check` 沿着索引图与决策链走，例外变成一条带理由和到期日的记录，而不是永久开关。
+
+### 新增
+
+- 校验 `test-report.md`：每个 AC 一行证据，含命令与输出，无占位符，`Verdict: PASS`。
+  `done` 拒绝设计项的报告缺失、未通过或不完整；条目还开着时，`check` 把同样的
+  问题报成 warning，不阻断迭代。
+- profile 新增 `[[exempt]]`：`check`、`path`、`reason`、`until`。过期豁免是 error
+  且不再静默；没有压住任何问题的豁免报为未使用；缺字段是 profile error。证据不可豁免。
+- `check` 沿文档图检查：`docs_dir/README.md` 是根，每个目录索引必须从它可达，
+  含 markdown 的目录必须有 `README.md`。条目与发布目录作为记录仓排除在外。
+- 入口文档除版本、端口、日期外，也不得写计数（`3 services`、`2 个应用`）。
+- 校验决策记录：状态枚举、`Superseded by:` 目标同目录存在、被点名者状态一致、
+  id 唯一、不成环。
+- `status --stale [--days N]`：列出超过 N 天没人碰的开启条目，日期由 git 推导
+  （未提交的条目用 `created`）。只报告，exit 0；`--json` 带同样的行。
+- `[release] confirm_risk_paths`：发布范围触及 `[design] risk_paths` 时，
+  `--record` 需要 `--confirm "<人说的话>"`，记录多出 `## Authorization` 段，
+  写明谁批准。
+- 参考文档：角色边界（实现者与验证者不得提交、提交者不得改代码、子代理空返回
+  重试一次），以及两条反模式（上游成功不是证据；轮询而不是固定 sleep）。
+- `references/invariants.md` 把 `human` 与 `partly` 记为欠账，必须给出机械化候选。
+
+### 变更
+
+- `done` 会拒绝它以前接受的东西：设计项没有 `test-report.md`、`Verdict` 不是 PASS、
+  或某个 AC 没有证据行。这正是 invariant 5 写明的规则，现在工具执行了自己那一半。
+- `check` 会失败在它以前通过的地方：决策链断裂、豁免过期、豁免条目非法。
+  升级后跑一次 `check`，报错会点名文件与修法。
+- `release --record` 现在给每条新记录写 `## Authorization` 段（无需确认时为 `None`）。
+  旧记录仍然有效。
+- `profile.template.toml` 要求 `>=0.3.6,<0.4`。
+
+### 破坏性变更
+
+- `[[exempt]]` 与 `[release] confirm_risk_paths` 对旧版加载器是未知键：升级了
+  profile 的项目必须在同一次变更里升级 skill。既有 `[flow] requires` 范围
+  （如 `>=0.3.5,<0.4`）仍然接受 0.3.6，未改动的 profile 可以照常工作。
+
 ## 0.3.5 — 2026-11-26
 
 那些「写进规格但一直靠人」的部分变成了检查：交接提示词由产物拼出而不是重打，`check`

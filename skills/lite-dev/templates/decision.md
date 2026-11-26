@@ -8,6 +8,12 @@
 - Date:
 - Owner:
 - Supersedes:
+- Superseded by:
+
+> `Status` is one of `proposed`, `accepted`, `rejected`, `superseded`,
+> `deprecated`. `Superseded by:` is required when the status is `superseded`,
+> names a file in this directory, and the chain must terminate. `check` enforces
+> the enum, the pointers, and the absence of cycles.
 
 ## Context
 

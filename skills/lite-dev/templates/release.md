@@ -33,6 +33,10 @@ tool: <TOOL>
 
 <ROLLBACK>
 
+## Authorization
+
+<AUTHORIZATION>
+
 ## Notes
 
 <NOTES>

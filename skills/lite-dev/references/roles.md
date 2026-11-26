@@ -8,7 +8,11 @@ harness supports it. The main session orchestrates; it does not implement.
 - Pass paths and ids, not conversation history.
 - Each role returns at most ~30 lines: what changed, evidence, open issues.
 - Only the commit role commits. Only the verify role declares PASS.
+- An implementer or verifier that commits is doing the commit role's work; a
+  committer that edits code is doing the implementer's. Stop the role, return
+  the finding, and let the orchestrator re-dispatch.
 - Never let the implementer be the only verifier.
+- No role closes the item. `done` closes it, after the evidence exists.
 
 ## Orchestrator (Phase B main session)
 
@@ -35,6 +39,9 @@ Input: item id, batch id, AC subset, how to run the product.
 - Verify black-box against the AC. Do not read the implementation rationale first.
 - Choose checks that can falsify the AC, not checks that reproduce the implementation.
 - Write `test-report.md`: verdict, evidence per AC, environment, what was not covered.
+  One row per AC with the command you ran and what it printed; `done` refuses a
+  designed item without it, and an empty cell is not evidence.
+- Do not commit. Report a defect; the commit role owns the commit.
 - Fix only defects inside the batch; at most two rounds, then stop and ask.
 
 ## Commit

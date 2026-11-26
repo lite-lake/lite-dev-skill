@@ -1,6 +1,8 @@
 import contextlib
 import io
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -150,6 +152,33 @@ Revert the single commit.
 None
 """
 
+REPORT = """\
+---
+item: {item_id}
+batch: B1
+---
+
+## Scope
+
+- Batch: B1
+- What was verified: the AC
+
+## Result
+
+- Verdict: {verdict}
+- Reason: ran the tests
+
+## Evidence
+
+| AC | Command | Output / artefact |
+|---|---|---|
+{rows}
+
+## Defects
+
+- None
+"""
+
 
 class BaseCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -224,6 +253,21 @@ class BaseCase(unittest.TestCase):
             text or DESIGN.format(ac_cell=ac_cell, item_id=item_id),
         )
         return artifacts.load_item(directory)
+
+    def write_report(
+        self,
+        rows: str = "| AC01 | python3 -m unittest | OK |",
+        verdict: str = "PASS",
+        item_id: str = ITEM_ID,
+        bucket: str = "2026-01",
+        slug: str = "demo",
+    ) -> Path:
+        path = self.root / f"docs/work/{bucket}/{item_id}-{slug}/test-report.md"
+        self._write(
+            path,
+            REPORT.format(item_id=item_id, verdict=verdict, rows=rows),
+        )
+        return path
 
     def run_flow(self, *args: str) -> tuple[int, str]:
         output = io.StringIO()
@@ -505,6 +549,52 @@ class StatusTest(BaseCase):
         artifacts.set_frontmatter_value(item.path, "closed", "2026-01-02")
         self.assertEqual(artifacts.load_item(item.directory).status, "done")
 
+    def _git(self, *args: str, env: dict | None = None) -> None:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def _commit_all(self, when: str) -> None:
+        self._git("add", "-A")
+        env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+        self._git(
+            "-c", "user.name=Test", "-c", "user.email=t@example.com",
+            "-c", "commit.gpgsign=false", "commit", "-qm", "init", env=env,
+        )
+
+    def test_stale_lists_open_items_untouched_for_days(self) -> None:
+        item = self.make_item(size="S")
+        self._git("init", "-q")
+        self._commit_all("2026-01-01T12:00:00")
+
+        code, output = self.run_flow("status", "--stale", "--days", "30")
+        self.assertEqual(code, 0, output)
+        self.assertIn("stale open items (>30 days", output)
+        self.assertIn(item.id, output)
+        self.assertIn("2026-01-01", output)
+
+        code, output = self.run_flow("status", "--stale", "--days", "10000")
+        self.assertEqual(code, 0, output)
+        self.assertIn("stale: none older than 10000 days", output)
+
+    def test_stale_json_carries_the_report(self) -> None:
+        item = self.make_item(size="S")
+        self._git("init", "-q")
+        self._commit_all("2026-01-01T12:00:00")
+
+        code, output = self.run_flow("status", "--stale", "--days", "30", "--json")
+        self.assertEqual(code, 0, output)
+        payload = json.loads(output)
+        self.assertEqual(payload["stale"]["days"], 30)
+        self.assertEqual([row["id"] for row in payload["stale"]["items"]], [item.id])
+        self.assertGreater(payload["stale"]["items"][0]["days"], 30)
+
 
 class CheckTest(BaseCase):
     def test_broken_link_is_an_error(self) -> None:
@@ -608,11 +698,62 @@ class DoneTest(BaseCase):
         self.write_design()
         code, output = self.run_flow("design-ready", ITEM_ID)
         self.assertEqual(code, 0, output)
+        self.write_report()
         code, output = self.run_flow("done", ITEM_ID)
         self.assertEqual(code, 0, output)
         item = artifacts.find_item(self.profile, ITEM_ID)
         self.assertTrue(item.meta["closed"])
         self.assertEqual(item.status, "done")
+        self.assertIn("test-report.md", item.path.read_text(encoding="utf-8"))
+
+    def test_done_refuses_a_designed_item_without_a_report(self) -> None:
+        self.make_item(ac="- [x] AC01 works")
+        self.write_design()
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        code, output = self.run_flow("done", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("requires test-report.md", output)
+
+    def test_done_refuses_a_failing_verdict(self) -> None:
+        self.make_item(ac="- [x] AC01 works")
+        self.write_design()
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        self.write_report(verdict="FAIL")
+        code, output = self.run_flow("done", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("verdict is 'FAIL'", output)
+
+    def test_done_refuses_a_missing_evidence_row(self) -> None:
+        self.make_item(ac="- [x] AC01 works\n- [x] AC02 works")
+        design = DESIGN.format(ac_cell="AC01, AC02", item_id=ITEM_ID).replace(
+            "| AC01 | python3 -m unittest | local | test output |",
+            "| AC01 | python3 -m unittest | local | test output |\n"
+            "| AC02 | python3 -m unittest | local | test output |",
+        )
+        self.write_design(text=design)
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        self.write_report(rows="| AC01 | python3 -m unittest | OK |")
+        code, output = self.run_flow("done", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("AC02 has no evidence row", output)
+
+    def test_done_refuses_empty_evidence_cells(self) -> None:
+        self.make_item(ac="- [x] AC01 works")
+        self.write_design()
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        self.write_report(rows="| AC01 | python3 -m unittest | |")
+        code, output = self.run_flow("done", ITEM_ID)
+        self.assertEqual(code, 1)
+        self.assertIn("AC01 has no Output evidence", output)
+
+    def test_check_reports_a_partial_report_as_a_warning(self) -> None:
+        self.make_item(ac="- [x] AC01 works")
+        self.write_design()
+        self.assertEqual(self.run_flow("design-ready", ITEM_ID)[0], 0)
+        self.write_report(verdict="FAIL")
+        code, output = self.run_flow("check")
+        self.assertEqual(code, 0, output)
+        self.assertIn("verdict is 'FAIL'", output)
 
     def test_done_writes_lf_endings(self) -> None:
         item = self.make_item(ac="- [x] AC01 works", size="S")

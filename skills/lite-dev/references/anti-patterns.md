@@ -34,4 +34,13 @@ not more effort.
 
 10. **Docs as a second codebase.** Duplicated facts drift. Fix: one authority per
     fact; everything else links. Entry documents contain no version numbers,
-    ports, or dates that will age.
+    ports, dates, or counts that will age.
+
+11. **Upstream success as evidence.** CI green means the build passed, not that
+    the new artifact is deployed; a previous gate PASS is not evidence for this
+    commit. Fix: evidence names the command and its output for the artifact you
+    are closing; `done` refuses a designed item without it.
+
+12. **Sleeping on a build.** A fixed sleep pulls the old image or reads a stale
+    report. Fix: poll the timestamp or the status, with a bound, and stop when
+    the bound expires.

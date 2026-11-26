@@ -234,6 +234,88 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     return warnings
 
 
+def _row_value_loose(row: dict[str, str], needles: tuple[str, ...]) -> str:
+    for key, value in row.items():
+        lowered = key.strip().lower()
+        if any(needle.lower() in lowered for needle in needles):
+            return value.strip()
+    return ""
+
+
+def _empty_evidence(value: str) -> bool:
+    return (
+        not value
+        or bool(PLACEHOLDER_WORDS.search(value))
+        or bool(artifacts.PLACEHOLDER_RE.search(value))
+    )
+
+
+def evidence_problems(
+    item: artifacts.Item, strict: bool = False
+) -> tuple[list[str], list[str]]:
+    """Validate `test-report.md`: one evidence row per AC, with a command and output.
+
+    `strict` is the difference between iterating and closing. While a batch is in
+    flight a partial report is a warning; `done` refuses it. The verdict is the
+    other half: a report that says FAIL is evidence that the item is not done.
+    """
+    path = item.directory / "test-report.md"
+    if not path.is_file():
+        return [], []
+    label = f"{item.directory.name}/test-report.md"
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    def emit(message: str) -> None:
+        (errors if strict else warnings).append(message)
+
+    meta, body = artifacts.parse_frontmatter(artifacts.read_text(path))
+    report_item = (meta.get("item") or "").strip()
+    if report_item and report_item != item.id:
+        errors.append(f"{label}: frontmatter 'item' must be {item.id}")
+
+    result = artifacts.section(body, "Result", "结论")
+    if result is None:
+        emit(f"{label}: missing '## Result'")
+    else:
+        match = re.search(
+            r"^\s*[-*]\s*(?:Verdict|结论)\s*[:：]\s*(.+?)\s*$", result, re.M | re.I
+        )
+        verdict = match.group(1).strip() if match else ""
+        if not verdict:
+            emit(f"{label}: '## Result' needs '- Verdict: PASS'")
+        elif verdict.upper() != "PASS":
+            emit(f"{label}: verdict is {verdict!r}; a passing report is required to close")
+
+    evidence = artifacts.section(body, "Evidence", "证据")
+    if evidence is None:
+        emit(f"{label}: missing '## Evidence'")
+        return errors, warnings
+
+    known = set(artifacts.ac_ids(item))
+    covered: set[str] = set()
+    for row in artifacts.parse_table(body, "Evidence", "证据"):
+        ac_id = artifacts.row_value(row, "AC", "验收项").strip()
+        if not ac_id or ac_id in {"AC", "-", "—"}:
+            continue
+        command = artifacts.row_value(row, "Command", "命令")
+        output = _row_value_loose(
+            row, ("output", "artefact", "artifact", "evidence", "输出", "证据")
+        )
+        if ac_id not in known:
+            warnings.append(f"{label}: evidence for {ac_id}, which item.md does not define")
+            continue
+        covered.add(ac_id)
+        for field, value in (("Command", command), ("Output", output)):
+            if _empty_evidence(value):
+                emit(f"{label}: {ac_id} has no {field} evidence")
+
+    for ac_id in artifacts.ac_ids(item):
+        if ac_id not in covered:
+            emit(f"{label}: {ac_id} has no evidence row")
+    return errors, warnings
+
+
 def owner_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
     """One spelling per person, and every owner on the roster when one is set.
 
@@ -273,6 +355,20 @@ def _path_matches(path: str, prefixes: list[str]) -> bool:
     return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
 
 
+def risk_paths_touched(profile: Profile, paths: list[str]) -> list[str]:
+    """Structural paths in a set of changed files, minus the documented exemptions."""
+    if not profile.design_risk_paths or not paths:
+        return []
+    return sorted(
+        {
+            path
+            for path in paths
+            if _path_matches(path, profile.design_risk_paths)
+            and not _path_matches(path, profile.design_risk_exempt)
+        }
+    )
+
+
 def risk_gate(
     item: artifacts.Item, profile: Profile, changed: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -284,14 +380,7 @@ def risk_gate(
     """
     if not profile.design_risk_paths or not changed:
         return [], []
-    touched = sorted(
-        {
-            path
-            for path in changed
-            if _path_matches(path, profile.design_risk_paths)
-            and not _path_matches(path, profile.design_risk_exempt)
-        }
-    )
+    touched = risk_paths_touched(profile, changed)
     if not touched or item.design_status == "ready":
         return [], []
     listed = ", ".join(touched[:3]) + (f" (+{len(touched) - 3} more)" if len(touched) > 3 else "")
@@ -443,6 +532,19 @@ def check_project(
 
         errors.extend(item_errors(item, profile))
         warnings.extend(item_warnings(item, profile))
+
+        evidence_errors, evidence_warnings = evidence_problems(item)
+        errors.extend(evidence_errors)
+        warnings.extend(evidence_warnings)
+        if (
+            item.status == "done"
+            and item.design_path is not None
+            and not (item.directory / "test-report.md").is_file()
+        ):
+            warnings.append(
+                f"{item.directory.name}: closed without a test-report; "
+                "the AC tick is a claim, not evidence"
+            )
 
         if item.design_path is not None:
             design_item = (item.design_meta.get("item") or "").strip()

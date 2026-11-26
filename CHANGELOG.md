@@ -2,6 +2,61 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.6 — 2026-11-26
+
+Evidence, reachability, and bounded silence become checks: `done` refuses a
+designed item without a passing test report, `check` follows the index graph and
+the decision chain, and an exception is a record with a reason and an expiry
+instead of a permanent switch.
+
+### Added
+
+- `test-report.md` is validated: one evidence row per AC with a command and an
+  output, no placeholders, `Verdict: PASS`. `done` refuses a designed item whose
+  report is missing, failing, or incomplete; while the item is open, `check`
+  reports the same problems as warnings so iterating is not blocked.
+- `[[exempt]]` in the profile: `check`, `path`, `reason`, `until`. An expired
+  exemption is an error and silences nothing; an exemption that suppresses
+  nothing is reported as unused; a missing field is a profile error. Evidence is
+  not exemptable.
+- `check` follows the document graph: `docs_dir/README.md` is the root, every
+  directory index must be reachable from it, and a directory of markdown needs
+  a `README.md`. Item and release directories are excluded as record stores.
+- Entry documents may not pin counts (`3 services`, `2 个应用`) in addition to
+  versions, ports, and dates.
+- Decision records are validated: status enum, `Superseded by:` target in the
+  same directory, a matching status for a named successor, unique ids, no cycles.
+- `status --stale [--days N]` lists open items nobody has touched for more than
+  N days, derived from git (`created` for an uncommitted item). Report only,
+  exit 0; `--json` carries the same rows.
+- `[release] confirm_risk_paths`: a release range that touches
+  `[design] risk_paths` needs `--confirm "<the human's words>"`, and the record
+  gains an `## Authorization` section naming who approved it.
+- References: role boundaries (implementer and verifier do not commit, the
+  committer does not edit code, an empty subagent return is retried once), and
+  two anti-patterns (upstream success is not evidence; poll, do not sleep).
+- `references/invariants.md` records `human` and `partly` as debts that need a
+  mechanisation candidate.
+
+### Changed
+
+- `done` can now refuse what it used to accept: a designed item with no
+  `test-report.md`, a `Verdict` other than PASS, or an AC without an evidence
+  row. This is invariant 5 as written; the tool now enforces its half.
+- `check` can now fail where it used to pass: a broken decision chain, an
+  expired exemption, or an invalid exemption entry. Run `check` once after
+  upgrading; the messages name the file and the fix.
+- `release --record` writes an `## Authorization` section to every new record
+  (`None` when no confirmation was needed). Older records stay valid.
+- `profile.template.toml` requires `>=0.3.6,<0.4`.
+
+### Breaking
+
+- `[[exempt]]` and `[release] confirm_risk_paths` are unknown keys to older
+  loaders: a project that upgrades its profile must upgrade the skill in the
+  same change. Existing `[flow] requires` ranges such as `>=0.3.5,<0.4` still
+  accept 0.3.6, so an untouched profile keeps working.
+
 ## 0.3.5 — 2026-11-26
 
 The parts of the flow that were specified but left to people become checks: the

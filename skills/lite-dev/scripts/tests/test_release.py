@@ -218,6 +218,34 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("revert", text)
         self.assertIn("no item for bootstrap commits", text)
         self.assertIn(MISSING_ID, text)
+        self.assertIn("## Authorization", text)
+        self.assertIn("None", text.split("## Authorization", 1)[1].split("## Notes", 1)[0])
+
+    def test_a_risk_release_needs_the_humans_confirmation(self) -> None:
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.replace(
+                "[release]",
+                '[design]\nrisk_paths = ["migrations/"]\n\n'
+                "[release]\nconfirm_risk_paths = true\n",
+            ),
+        )
+        self.commit("chore: require confirmation")
+        self.commit(f"feat: migration ({MISSING_ID})", "migrations/001.sql", "create table x;\n")
+
+        code, output = self.record_release()
+        self.assertEqual(code, 1)
+        self.assertIn("--confirm", output)
+        self.assertIn("migrations/", output)
+        self.assertEqual(self.record_paths(), [])
+
+        code, output = self.record_release("--confirm", "ops approved the migration")
+        self.assertEqual(code, 0, output)
+        text = self.record_paths()[0].read_text(encoding="utf-8")
+        section = text.split("## Authorization", 1)[1].split("## Notes", 1)[0]
+        self.assertIn("Required: yes", section)
+        self.assertIn("Confirmed by: releaser", section)
+        self.assertIn("ops approved the migration", section)
 
     def test_dry_run_is_read_only(self) -> None:
         code, output = self.run_flow("release", "--channel", "staging")

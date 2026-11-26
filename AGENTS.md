@@ -34,6 +34,11 @@ every template.
    both. The Chinese file mirrors the English structure section by section; only
    the prose is translated. Headings that `scripts/flowlib` parses stay English
    in both. Do not let one language drift ahead.
+8. **Prefer the hardest carrier.** A new rule starts as far left as it fits:
+   generator, gate step, check, template, prose, habit. `human` and `partly` in
+   `references/invariants.md` are debts: when you add or change an invariant,
+   name the mechanisation candidate. An escape hatch is a record with a reason
+   and an expiry (`[[exempt]]`), never a permanent switch.
 
 ## Before you finish
 

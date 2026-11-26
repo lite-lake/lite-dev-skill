@@ -7,6 +7,12 @@ Each invariant names how it is enforced. "Tool" means `flow.py` refuses or
 reports; "human" means a stop condition; "partly" means specified but only
 partially mechanised.
 
+`human` and `partly` are debts, not categories. Adding or changing an invariant
+requires naming its mechanisation candidate: a generator, a gate step, a check,
+a template, then prose, then habit. An item that has stayed `human` for two
+releases either becomes a check or is deleted — a rule nobody enforces is a rule
+that teaches people to ignore the file.
+
 ## 1. Clarify before design, design before code
 
 - A requirement has at most five open questions, asked once, with defaults.
@@ -49,9 +55,13 @@ partially mechanised.
 
 - The verifier checks AC black-box, not the implementer's rationale.
 - Evidence is written to `test-report.md`; a claim is not evidence.
+- Evidence is one row per AC with the command and its output. A row with an
+  empty cell, a placeholder, or no row at all is not evidence.
 - When the harness has no subagents, the weaker mode is declared, not hidden.
-- **Enforced**: partly (missing test-report is reported when a design is ready);
-  otherwise human.
+- **Enforced**: `done` refuses a designed item without `test-report.md`, without
+  `Verdict: PASS`, or with an AC that has no evidence row. While the item is
+  open, `check` reports a partial or failing report as a warning so iterating
+  is not blocked. Whether the evidence is *sufficient* is still human.
 
 ## 6. Every batch is planned before the first one
 
@@ -87,13 +97,22 @@ partially mechanised.
   have exactly one home. Other documents link.
 - Entry documents (`README`, `AGENTS`) contain no version numbers, ports,
   service counts, or dates that will drift.
-- Every document is reachable: a file in an indexed directory is linked from that
-  directory's `README.md`; every artifact in an item directory is mentioned by
-  its `item.md`.
+- A document without a route does not exist: an index that nobody links is not
+  an index, and a directory of documents without one has no entry point.
+- Every document is reachable: `docs_dir/README.md` is the root index; every
+  directory index outside the record stores (`work_dir`, the release directory,
+  `_archive/`) is reachable from it by following links; a file in an indexed
+  directory is linked from that directory's `README.md`; every artifact in an
+  item directory is mentioned by its `item.md`.
+- A decision is superseded, never rewritten: the status is an enum, a superseded
+  decision names its successor, the successor exists, and the chain terminates.
+- A silence is a record, not a switch: an exception names one check, one path, a
+  reason, and an expiry. An expired exception suppresses nothing and is an error.
 - **Enforced**: `check` reports missing required documents, unresolved relative
-  links, unindexed files, unmentioned item artifacts, duplicate headings in a
-  release record, version/port/date pins in entry documents, and a missing
-  decisions index. Whether the prose is true is still human.
+  links, unreachable directory indexes, directories with no index, unindexed
+  files, unmentioned item artifacts, duplicate headings in a release record,
+  version/port/date/count pins in entry documents, broken decision chains, and
+  expired or unused exemptions. Whether the prose is true is still human.
 
 ## 10. Extensions may add, never remove
 
@@ -116,7 +135,12 @@ partially mechanised.
 
 - Data, permissions, credentials, and releases need a rollback target first.
 - No rollback, no irreversible step.
-- **Enforced**: human; `design-ready` requires `## Rollback` to be non-empty.
+- A release that touches a structural path is an irreversibility the profile can
+  make explicit: with `[release] confirm_risk_paths = true`, the record must name
+  the human's authorisation, not just the rollback.
+- **Enforced**: human; `design-ready` requires `## Rollback` to be non-empty, and
+  `release --record` refuses a risk-path range without `--confirm` when the
+  profile asks for it.
 
 ## 13. Identity is collision-resistant and never guessed
 

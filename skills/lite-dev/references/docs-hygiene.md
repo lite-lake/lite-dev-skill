@@ -6,12 +6,21 @@ facts. `check` mechanises the part of it that can be decided from the files:
 | Rule | Severity | What it means |
 |---|---|---|
 | relative links resolve | error | a link to a deleted or renamed file |
+| every directory index is reachable from `docs_dir/README.md` | warning | an index nobody can find |
+| a directory of documents has a `README.md` | warning | no entry point for the subtree |
 | every file is linked from its directory's `README.md` | warning | a file nobody can reach |
 | every artifact in an item directory is mentioned in `item.md` | warning | a `test-report.md` the next session will miss |
 | a release record repeats no `##` heading | error | two entries collided in an append-only file |
-| entry documents pin no version, port, or date | warning | a copy of a fact that will drift |
+| entry documents pin no version, port, date, or count | warning | a copy of a fact that will drift |
+| a decision's status and supersede pointers agree | error | a rewritten or dangling decision |
 | `[docs] decisions` exists and has a `README.md` | error | a decisions directory with no index |
-| no active document links into `_archive/` | reported by the archive rule | history is reachable through the archive index, not from live docs |
+| an exemption has a reason and has not expired | error | a silence nobody reviewed |
+| an exemption suppresses at least one issue | warning | a stale exception |
+| no active document links into `_archive/` | warning | history read as current |
+| a designed item has a passing test report | error at `done` | an AC tick standing in for evidence |
+
+The last row is not a document rule: it is invariant 5, enforced where the item
+closes. `check` reports it as a warning while the item is still open.
 
 ## What counts as an entry document
 
@@ -24,6 +33,56 @@ The patterns are shapes, not a list of tools:
 - a version pin: a known runtime word followed by `1.2` or `1.2.3`
 - a port: `localhost:8080`, `127.0.0.1:3000`, `0.0.0.0:80`
 - a date: `2026-11-26`
+- a count: `3 services`, `2 个应用`, `5 处路由`
+
+## Indexes and reachability
+
+`docs_dir/README.md` is the root of the graph. Every directory index (`README.md`
+or `index.md`) must be reachable from it by following links, and every directory
+that holds markdown needs one. The per-directory rule only covered directories
+that already had a README, which left a whole unreferenced subtree invisible.
+
+Record stores are excluded: item directories under `work_dir` are listed by
+`status`, release records are ordered by the commit graph. Demanding index links
+for them would be noise, not reachability.
+
+A document that cannot be described as one row in a route table probably should
+not exist. Write the row first; if it does not make sense, the page has no
+reader.
+
+## Exemptions
+
+A conflict between a rule and reality has two legal outcomes: fix the document,
+or register the exception. Turning a check off for the whole project is not one
+of them.
+
+```toml
+[[exempt]]
+check = "links"            # links | index | artifact | archive_link | zero_fact | heading
+path = "docs/legacy"       # path prefix, relative to the project root
+reason = "imported handbook, not maintained here"
+until = "2027-03-31"
+```
+
+- Every field is required; the profile loader rejects a missing reason or date.
+- An expired exemption is an error and silences nothing.
+- An exemption that suppresses no issue is reported: the exception outlived the
+  problem.
+- Evidence is not exemptable. An exemption records drift, it does not waive an
+  invariant.
+
+## Decisions
+
+A decision that changes is superseded, never rewritten. `check` enforces the
+mechanics:
+
+- `Status` is one of `proposed`, `accepted`, `rejected`, `superseded`,
+  `deprecated`;
+- a `superseded` decision has `Superseded by:` pointing at a decision in the
+  same directory;
+- a decision that names a successor has the matching status;
+- the chain terminates;
+- ids are unique within the directory.
 
 ## What is deliberately not checked
 
@@ -35,10 +94,10 @@ The patterns are shapes, not a list of tools:
 
 ## Turning it down
 
-`[docs] check_links = false` and `[docs] zero_fact = false` exist for a
-migration, not as a permanent setting. A project that turns them off has to say
-so in its own `AGENTS.md`, because the next session will otherwise assume the
-checks ran.
+`[docs] check_links = false` and `zero_fact = false` are migration switches, not
+settings. Prefer one `[[exempt]]` entry per problem: it names the path, records
+why, and expires. A project that still uses a global switch has to say so in its
+own `AGENTS.md`, because the next session will otherwise assume the checks ran.
 
 ## Archiving
 

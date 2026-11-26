@@ -186,3 +186,39 @@ def total_commits(root: Path, since: str | None = None) -> int:
 def files(root: Path, sha: str) -> list[str]:
     output = _run(root, "show", "--pretty=format:", "--name-only", sha)
     return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def files_in_range(root: Path, since: str | None) -> list[str]:
+    """Every path touched in `since..HEAD`, or in all of HEAD's history."""
+    revision = f"{since}..HEAD" if since else "HEAD"
+    output = _run(root, "log", "--format=", "--name-only", revision)
+    return list(dict.fromkeys(line.strip() for line in output.splitlines() if line.strip()))
+
+
+def activity_dates(root: Path, base: str) -> dict[str, str]:
+    """Latest commit date per directory two levels below `base`.
+
+    `<work_dir>` holds `<YYYY-MM>/<item>/`; one walk answers "when did anyone
+    last touch this item" without a git call per item. The date is a label for
+    a report, not a watermark: ordering still comes from the commit graph.
+    """
+    try:
+        output = _run(root, "log", "--date=short", "--format=@@%ad", "--name-only", "--", base)
+    except GitError:
+        return {}
+    base_parts = tuple(part for part in Path(base).parts if part not in ("", "."))
+    result: dict[str, str] = {}
+    current: str | None = None
+    for line in output.splitlines():
+        if line.startswith("@@"):
+            current = line[2:].strip()
+            continue
+        path = line.strip().replace("\\", "/")
+        if not current or not path.endswith(".md"):
+            continue
+        parts = tuple(path.split("/"))
+        if len(parts) < len(base_parts) + 2 or parts[: len(base_parts)] != base_parts:
+            continue
+        key = "/".join(parts[: len(base_parts) + 2])
+        result.setdefault(key, current)
+    return result

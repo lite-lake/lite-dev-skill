@@ -176,6 +176,7 @@ def render(
     artifacts_text: str,
     rollback: str,
     notes: str,
+    authorization: str = "None",
 ) -> str:
     text = TEMPLATE.read_text(encoding="utf-8")
     for token, value in {
@@ -190,6 +191,7 @@ def render(
         "<ITEMS>": items,
         "<ARTIFACTS>": artifacts_text,
         "<ROLLBACK>": rollback,
+        "<AUTHORIZATION>": authorization,
         "<NOTES>": notes,
     }.items():
         text = text.replace(token, value)
