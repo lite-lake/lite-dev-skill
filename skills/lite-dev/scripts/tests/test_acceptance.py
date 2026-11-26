@@ -58,10 +58,21 @@ class AcceptanceTest(unittest.TestCase):
         return match.group(1)
 
     def item_dir(self, item_id: str, root: Path | None = None) -> Path:
+        """Find <work_dir>/<YYYY-MM>/<id>-<slug> for the given id."""
         base = (root or self.root) / "docs/work"
-        matches = [path for path in base.iterdir() if path.is_dir() and path.name.startswith(item_id)]
+        matches = [
+            directory
+            for bucket in base.iterdir()
+            if bucket.is_dir()
+            for directory in bucket.iterdir()
+            if directory.is_dir() and directory.name.startswith(item_id)
+        ]
         self.assertEqual(len(matches), 1, matches)
         return matches[0]
+
+    def month_of(self, item_id: str) -> str:
+        """'20261126-REQ-...' -> '2026-11'."""
+        return f"{item_id[0:4]}-{item_id[4:6]}"
 
     def clarify_and_fill_ac(self, directory: Path, first: str, second: str) -> None:
         path = directory / "item.md"
@@ -175,9 +186,10 @@ class AcceptanceTest(unittest.TestCase):
         self.assertNotEqual(first_id, second_id)
 
         # Merge the second clone's work item into the first, as git would.
+        month = self.month_of(second_id)
         shutil.copytree(
-            other / "docs/work" / f"{second_id}-Same-Title",
-            self.root / "docs/work" / f"{second_id}-Same-Title",
+            other / "docs/work" / month / f"{second_id}-Same-Title",
+            self.root / "docs/work" / month / f"{second_id}-Same-Title",
         )
         check = self.run_flow("check")
         self.assertEqual(check.returncode, 0, check.stdout)

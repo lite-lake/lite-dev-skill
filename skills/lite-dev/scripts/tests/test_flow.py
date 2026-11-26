@@ -25,7 +25,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.3.1,<0.4"
+requires = ">=0.3.2,<0.4"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -191,8 +191,9 @@ class BaseCase(unittest.TestCase):
         owner: str = "alice",
         title: str = "Demo item",
         size: str = "L",
+        bucket: str = "2026-01",
     ):
-        directory = self.root / f"docs/work/{item_id}-demo"
+        directory = self.root / f"docs/work/{bucket}/{item_id}-demo"
         self._write(
             directory / "item.md",
             ITEM.format(
@@ -207,8 +208,14 @@ class BaseCase(unittest.TestCase):
         )
         return artifacts.load_item(directory)
 
-    def write_design(self, text: str | None = None, ac_cell: str = "AC01", item_id: str = ITEM_ID):
-        directory = self.root / f"docs/work/{item_id}-demo"
+    def write_design(
+        self,
+        text: str | None = None,
+        ac_cell: str = "AC01",
+        item_id: str = ITEM_ID,
+        bucket: str = "2026-01",
+    ):
+        directory = self.root / f"docs/work/{bucket}/{item_id}-demo"
         self._write(
             directory / "design.md",
             text or DESIGN.format(ac_cell=ac_cell, item_id=item_id),
@@ -259,7 +266,7 @@ class ProfileTest(BaseCase):
     def test_flow_requires_pins_the_version(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('requires = ">=0.3.1,<0.4"', 'requires = ">=9,<10"'),
+            PROFILE.replace('requires = ">=0.3.2,<0.4"', 'requires = ">=9,<10"'),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -268,7 +275,7 @@ class ProfileTest(BaseCase):
     def test_flow_table_is_required(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('[flow]\nrequires = ">=0.3.1,<0.4"\n\n', ""),
+            PROFILE.replace('[flow]\nrequires = ">=0.3.2,<0.4"\n\n', ""),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -316,9 +323,9 @@ class NewTest(BaseCase):
         )
         self.assertEqual(code, 0, output)
         self.assertIn("created", output)
-        directories = [path for path in (self.root / "docs/work").iterdir() if path.is_dir()]
-        self.assertEqual(len(directories), 1)
-        item = artifacts.load_item(directories[0])
+        items = artifacts.all_items(self.profile)
+        self.assertEqual(len(items), 1)
+        item = items[0]
         self.assertIsNotNone(self.profile.id_pattern.search(item.id))
         self.assertIn("BUG", item.id)
         self.assertEqual(item.meta["title"], "Fix Login Bug")
@@ -326,11 +333,22 @@ class NewTest(BaseCase):
         self.assertEqual(item.meta["owner"], "alice")
         self.assertEqual(item.ac_total, 2)
 
+    def test_new_files_the_item_under_its_month(self) -> None:
+        moment = datetime(2026, 3, 4, 9, 30, 15, 123_000)
+        with mock.patch.object(flow.stamp, "now", return_value=moment):
+            code, output = self.run_flow("new", "--title", "March", "--type", "REQ", "--size", "S")
+        self.assertEqual(code, 0, output)
+        item_id = output.split()[1]
+        bucket = self.root / "docs/work/2026-03"
+        self.assertTrue(bucket.is_dir(), bucket)
+        self.assertEqual([p.name for p in bucket.iterdir()], [f"{item_id}-March"])
+
     def test_ids_are_unique_for_identical_input(self) -> None:
         for _ in range(5):
             code, output = self.run_flow("new", "--title", "Same Title", "--type", "REQ")
             self.assertEqual(code, 0, output)
-        ids = [artifacts.load_item(path).id for path in (self.root / "docs/work").iterdir() if path.is_dir()]
+        ids = [item.id for item in artifacts.all_items(self.profile)]
+        self.assertEqual(len(ids), 5)
         self.assertEqual(len(ids), len(set(ids)))
 
     def test_new_requires_identity(self) -> None:
@@ -338,15 +356,12 @@ class NewTest(BaseCase):
             code, output = self.run_flow("new", "--title", "No identity")
         self.assertEqual(code, 2)
         self.assertIn("no identity", output)
-        work = self.root / "docs/work"
-        directories = [path for path in work.iterdir() if path.is_dir()] if work.is_dir() else []
-        self.assertEqual(directories, [])
+        self.assertFalse((self.root / "docs/work").exists())
 
     def test_new_accepts_an_explicit_owner(self) -> None:
         code, output = self.run_flow("new", "--title", "Owned", "--owner", "bob")
         self.assertEqual(code, 0, output)
-        directory = [path for path in (self.root / "docs/work").iterdir() if path.is_dir()][0]
-        self.assertEqual(artifacts.load_item(directory).meta["owner"], "bob")
+        self.assertEqual(artifacts.all_items(self.profile)[0].meta["owner"], "bob")
 
 
 class IdStampTest(BaseCase):
@@ -392,6 +407,36 @@ class IdStampTest(BaseCase):
         self.assertEqual(code, 0, output)
         last = flow.stamp.encode(flow.stamp.MS_PER_DAY - 1)
         self.assertIn(f"created 20261231-REQ-{last}", output)
+
+
+class LayoutTest(BaseCase):
+    """Items live at <work_dir>/<YYYY-MM>/<id>-<slug>; a wrong bucket is loud."""
+
+    def test_item_outside_its_month_is_an_error(self) -> None:
+        self.make_item(bucket="2026-02")
+        errors, _ = checks.check_project(self.profile)
+        self.assertTrue(
+            any("month directory must be 2026-01" in error for error in errors), errors
+        )
+
+    def test_flat_item_directory_is_reported(self) -> None:
+        # A pre-month item: it must not disappear from `check` silently.
+        self._write(self.root / "docs/work/20260101-REQ-aaaaaa-demo/item.md", "---\n---\n")
+        errors, _ = checks.check_project(self.profile)
+        self.assertTrue(any("items live in" in error for error in errors), errors)
+
+    def test_stray_directory_in_a_month_warns(self) -> None:
+        (self.root / "docs/work/2026-01/empty").mkdir(parents=True)
+        errors, warnings = checks.check_project(self.profile)
+        self.assertFalse([error for error in errors if "empty" in error], errors)
+        self.assertTrue(
+            any("2026-01/empty: no item.md" in warning for warning in warnings), warnings
+        )
+
+    def test_find_item_resolves_an_id_inside_a_month(self) -> None:
+        item = self.make_item(size="S")
+        self.assertEqual(artifacts.find_item(self.profile, item.id).id, item.id)
+        self.assertEqual(artifacts.find_item(self.profile, "20260101-REQ").id, item.id)
 
 
 class StatusTest(BaseCase):

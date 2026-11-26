@@ -26,7 +26,7 @@ name = "release-project"
 language = "en"
 
 [flow]
-requires = ">=0.3.1,<0.4"
+requires = ">=0.3.2,<0.4"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -86,7 +86,7 @@ class ReleaseTest(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.write("docs/flow/profile.toml", PROFILE)
         self.write("README.md", "# release project\n")
-        self.write(f"docs/work/{ITEM_ID}-demo/item.md", ITEM)
+        self.write(f"docs/work/2026-01/{ITEM_ID}-demo/item.md", ITEM)
         self.git("init", "-q")
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
         self.git("config", "user.email", "test@example.com")
@@ -155,7 +155,7 @@ class ReleaseTest(unittest.TestCase):
             f"source: {source}\n"
             f"previous: {previous}\n"
             "by: tester\n"
-            "tool: 0.3.1\n"
+            "tool: 0.3.2\n"
             "---\n\n# Release\n",
         )
         return self.root / "docs/releases" / name
@@ -212,7 +212,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn("channel: staging", text)
         self.assertIn("previous: none", text)
         self.assertIn("by: releaser", text)
-        self.assertIn("tool: 0.3.1", text)
+        self.assertIn("tool: 0.3.2", text)
         self.assertIn(head, text)
         self.assertIn("PASS l1", text)
         self.assertIn("revert", text)

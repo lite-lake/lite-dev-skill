@@ -50,8 +50,8 @@ condition. Stop only for the conditions in SKILL.md §9.
 
 ```text
 Continue work item <ID>.
-Read: docs/work/<dir>/item.md (Clarify, AC, Implementation) and
-      docs/work/<dir>/design.md (Handoff, Batches).
+Read: docs/work/<YYYY-MM>/<dir>/item.md (Clarify, AC, Implementation) and
+      docs/work/<YYYY-MM>/<dir>/design.md (Handoff, Batches).
 Implement batches <Bx..By> in order. For each: implement -> verify -> commit,
 then update ## Implementation. Do not redesign. Do not stop between batches.
 Gate: python3 <skill>/scripts/flow.py gate --level l1 --work <ID>

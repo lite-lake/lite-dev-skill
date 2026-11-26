@@ -170,9 +170,15 @@ def item_errors(item: artifacts.Item, profile: Profile) -> list[str]:
         )
     if item.meta.get("mode") and item.meta["mode"] not in MODES:
         errors.append(f"{label}: mode {item.meta['mode']!r} must be one-shot or two-phase")
-    created = item.meta.get("created", "").replace("-", "")
-    if item.id and created and created not in item.id:
-        errors.append(f"{label}: id {item.id} does not contain the created date {item.meta.get('created')}")
+    created = (item.meta.get("created") or "").strip()
+    if item.id and created and created.replace("-", "") not in item.id:
+        errors.append(f"{label}: id {item.id} does not contain the created date {created}")
+    month = artifacts.month_of(created)
+    if artifacts.MONTH_RE.match(month) and item.directory.parent.name != month:
+        errors.append(
+            f"{label}: month directory must be {month} (from created), not "
+            f"{item.directory.parent.name}; move it to <work_dir>/{month}/"
+        )
 
     if item.ac_total == 0:
         errors.append(f"{label}: ## AC has no AC01-style entries")
@@ -219,6 +225,33 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     return warnings
 
 
+def layout_problems(profile: Profile) -> tuple[list[str], list[str]]:
+    """Validate the <work_dir>/<YYYY-MM>/<id>-<slug> layout.
+
+    A misnamed bucket is an error, not a skip: a tool that only reads month
+    buckets would otherwise lose every item filed under it.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not profile.work_path.is_dir():
+        return errors, warnings
+    for bucket in sorted(profile.work_path.iterdir()):
+        if not bucket.is_dir():
+            continue
+        if not artifacts.MONTH_RE.match(bucket.name):
+            errors.append(
+                f"{bucket.name}: items live in <work_dir>/<YYYY-MM>/<id>-<slug>; "
+                "move it into a YYYY-MM directory named after the item's created month"
+            )
+            continue
+        for entry in sorted(bucket.iterdir()):
+            if entry.is_dir() and not (entry / "item.md").is_file():
+                warnings.append(
+                    f"{bucket.name}/{entry.name}: no item.md; remove it or restore the file"
+                )
+    return errors, warnings
+
+
 def check_project(
     profile: Profile, work: str | None = None
 ) -> tuple[list[str], list[str]]:
@@ -233,6 +266,11 @@ def check_project(
     for relative in profile.required_docs:
         if not (profile.root / relative).exists():
             errors.append(f"missing required document: {relative}")
+
+    if work is None:
+        layout_errors, layout_warnings = layout_problems(profile)
+        errors.extend(layout_errors)
+        warnings.extend(layout_warnings)
 
     items = artifacts.all_items(profile)
     by_id: dict[str, list[str]] = {}

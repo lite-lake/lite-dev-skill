@@ -86,7 +86,7 @@ python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```
 
-- `new` allocates `{date}-{type}-{time}` and creates `<work_dir>/<id>-<slug>/item.md`;
+- `new` allocates `{date}-{type}-{time}` and creates `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`;
   it needs an identity (`--owner`, `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
 - `check` validates fields, AC, links, and design rules; `--work` limits it to one item.
 - `design-ready` refuses an incomplete design and writes `status: ready`.

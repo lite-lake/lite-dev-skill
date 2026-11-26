@@ -2,6 +2,32 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.2 — 2026-11-26
+
+Work items are filed by month, so a long-lived project does not keep thousands
+of directories in one place.
+
+### Breaking changes
+
+- Items live at `<work_dir>/<YYYY-MM>/<id>-<slug>/`. The month comes from the
+  item's `created` date and is written once by `new`; `check` reports an item
+  filed under another month.
+- A directory directly under `<work_dir>` that is not `YYYY-MM` is an error,
+  never skipped. Move a pre-0.3.2 flat item with
+  `git mv <work_dir>/<id>-<slug> <work_dir>/<YYYY-MM>/`.
+- `[flow] requires` in the template, `examples/minimal`, and the bundled
+  `go-service` extension is now `>=0.3.2,<0.4`: 0.3.1 would look for items in
+  the old layout and find none.
+
+### Changed
+
+- `new` creates the month directory and files the item inside it.
+- `new`'s duplicate scan reads only the target month instead of every item in
+  the project; an id carries its `created` date, so a candidate cannot collide
+  with an item filed in another month.
+- `check` warns about a month directory that holds a stray directory without
+  `item.md`.
+
 ## 0.3.1 — 2026-11-26
 
 Item ids carry the millisecond of the local day, so they sort in creation order.

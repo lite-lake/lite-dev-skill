@@ -89,10 +89,20 @@ _CLOCK = stamp.Clock()
 def _new_id(
     profile: profile_mod.Profile, item_type: str, created: str, moment: datetime
 ) -> str:
-    """Allocate the id for this moment, bumping the time code on collision."""
-    existing = {item.id for item in artifacts.all_items(profile)}
-    if profile.work_path.is_dir():
-        existing.update(path.name for path in profile.work_path.iterdir() if path.is_dir())
+    """Allocate the id for this moment, bumping the time code on collision.
+
+    Only the item's month bucket is read: an id carries `created`'s date, so a
+    candidate can only meet an item filed in the same month.
+    """
+    bucket = profile.work_path / artifacts.month_of(created)
+    existing: set[str] = set()
+    if bucket.is_dir():
+        for path in bucket.iterdir():
+            if not path.is_dir():
+                continue
+            existing.add(path.name)
+            if (path / "item.md").is_file():
+                existing.add(artifacts.load_item(path).id)
     ms = _CLOCK.allocate(created, moment)
     for _ in range(ID_ATTEMPTS):
         if ms >= stamp.MS_PER_DAY:
@@ -132,16 +142,17 @@ def cmd_new(args) -> int:
     owner = identity.resolve(profile.root, args.owner)
     moment = stamp.now()
     created = moment.date().isoformat()
+    bucket = profile.work_path / artifacts.month_of(created)
     title = " ".join(args.title.split())
     slug = _slugify(title)
 
     with fsio.project_lock(profile.root):
-        profile.work_path.mkdir(parents=True, exist_ok=True)
+        bucket.mkdir(parents=True, exist_ok=True)
         directory = None
         item_id = ""
         for _ in range(5):
             item_id = _new_id(profile, item_type, created, moment)
-            candidate = profile.work_path / (f"{item_id}-{slug}" if slug else item_id)
+            candidate = bucket / (f"{item_id}-{slug}" if slug else item_id)
             try:
                 candidate.mkdir(parents=False, exist_ok=False)
             except FileExistsError:

@@ -16,12 +16,18 @@ from .profile import Profile
 FM_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", re.S)
 HEADING_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
 AC_RE = re.compile(r"^\s*[-*]\s+\[([ xX])\]\s*(AC\d{2,3})\b[ \t]*(.*)$", re.M)
+MONTH_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 CLARIFIED = {"clarified", "confirmed", "ready", "已澄清", "已确认", "无歧义"}
 DROPPED = {"dropped", "cancelled", "canceled", "已放弃"}
 PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
 
 ITEM_FIELDS = ("id", "title", "type", "priority", "size", "mode", "owner", "created")
+
+
+def month_of(created: str) -> str:
+    """The bucket an item lives in: '2026-11-26' -> '2026-11'."""
+    return created.strip()[:7]
 
 
 def read_text(path: Path) -> str:
@@ -213,12 +219,20 @@ def load_item(directory: Path) -> Item:
 
 
 def all_items(profile: Profile) -> list[Item]:
+    """Items live at <work_dir>/<YYYY-MM>/<id>-<slug>/item.md.
+
+    Buckets are read whatever their name, so a misplaced item is still found and
+    reported by `check` instead of disappearing from the listing.
+    """
     if not profile.work_path.is_dir():
         return []
     items = []
-    for directory in sorted(profile.work_path.iterdir()):
-        if directory.is_dir() and (directory / "item.md").is_file():
-            items.append(load_item(directory))
+    for bucket in sorted(profile.work_path.iterdir()):
+        if not bucket.is_dir():
+            continue
+        for directory in sorted(bucket.iterdir()):
+            if directory.is_dir() and (directory / "item.md").is_file():
+                items.append(load_item(directory))
     return items
 
 
