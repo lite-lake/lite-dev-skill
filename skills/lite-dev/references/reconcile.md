@@ -14,13 +14,19 @@ flow.py reconcile --json --verbose
 ```
 
 It always exits 0 when it can produce a report. Missing git, an unknown channel,
-or a bad `--since` exits 2. Debt never blocks anything.
+a bad `--since`, or a release record it cannot order exits 2. Debt never blocks
+anything; an ambiguous channel history does.
 
 ## Watermark
 
-The last release record for the channel (`source`) is the watermark. `--since`
-overrides it. With no record, the whole history is inspected; use `--since` on a
-large repository.
+The watermark is the ancestry tip of the channel's records, not the newest
+filename. `--since` overrides it and must be an ancestor of HEAD. With no
+record, the whole history is inspected; use `--since` on a large repository.
+
+A record that references a commit missing from this clone, two records that are
+not on one history, or a `previous` that does not match the record before it is
+reported as an error. The range cannot be trusted until it is fixed, so
+`reconcile` exits 2 instead of printing a misleading report.
 
 ## Categories
 

@@ -18,6 +18,8 @@ SIZES = ("S", "M", "L")
 PRIORITIES = ("P0", "P1", "P2", "P3")
 MODES = ("one-shot", "two-phase")
 LEVELS = ("l1", "l2", "l3")
+RAND_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
+RAND_LEN = 5
 EXTENSION_KEYS = {"name", "version", "description", "requires", "commands", "gate", "docs", "reconcile"}
 
 
@@ -34,7 +36,6 @@ class Profile:
     docs_dir: str
     work_dir: str
     id_format: str
-    owner: str
     commands: dict[str, str]
     gate: dict[str, list[str]]
     design_required_for: list[str]
@@ -43,10 +44,13 @@ class Profile:
     release_channels: list[str]
     release_dir: str
     release_gate_level: str
+    release_mainline: str
+    release_require_artifacts: bool
     risk_paths: list[str]
     extensions_enabled: list[str]
     extensions_dir: str
     extension_info: list[dict]
+    requires: str
     id_pattern: re.Pattern
 
     @property
@@ -157,12 +161,13 @@ def _id_pattern(id_format: str) -> re.Pattern:
             parts.append(r"\d{8}")
         elif token == "{type}":
             parts.append(r"[A-Z]+")
-        elif token == "{owner}":
-            parts.append(r"\d+")
-        elif token.startswith("{seq"):
-            parts.append(r"\d+")
+        elif token == "{rand}":
+            parts.append(f"[{RAND_ALPHABET}]{{{RAND_LEN}}}")
         elif token.startswith("{"):
-            raise ProfileError(f"[id] format has unknown placeholder {token}")
+            raise ProfileError(
+                f"[id] format has unknown placeholder {token}; "
+                "supported: {date}, {type}, {rand}"
+            )
         else:
             parts.append(re.escape(token))
     return re.compile(r"(?<![A-Za-z0-9])" + "".join(parts) + r"(?![A-Za-z0-9])")
@@ -306,7 +311,7 @@ def load(path: Path | str | None = None) -> Profile:
     except tomllib.TOMLDecodeError as exc:
         raise ProfileError(f"{profile_path}: invalid TOML: {exc}") from exc
 
-    for key in ("project", "id", "commands", "gate"):
+    for key in ("project", "id", "flow", "commands", "gate"):
         if not isinstance(raw.get(key), dict):
             raise ProfileError(f"[{key}] table is required")
 
@@ -319,14 +324,18 @@ def load(path: Path | str | None = None) -> Profile:
     release = raw.get("release") or {}
     reconcile = raw.get("reconcile") or {}
     extensions = raw.get("extensions") or {}
+    flow_table = raw.get("flow") or {}
 
     _allow_keys(project, ("name", "language", "docs_dir", "work_dir"), "[project]")
-    _allow_keys(id_table, ("format", "owner"), "[id]")
+    _allow_keys(id_table, ("format",), "[id]")
     _allow_keys(design, ("required_for", "require_confirmed"), "[design]")
     _allow_keys(docs, ("required",), "[docs]")
-    _allow_keys(release, ("channels", "dir", "gate_level"), "[release]")
+    _allow_keys(
+        release, ("channels", "dir", "gate_level", "mainline", "require_artifacts"), "[release]"
+    )
     _allow_keys(reconcile, ("risk_paths",), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
+    _allow_keys(flow_table, ("requires",), "[flow]")
 
     name = _require(project, "name", "[project]")
     language = project.get("language", "en")
@@ -342,14 +351,11 @@ def load(path: Path | str | None = None) -> Profile:
             raise ProfileError(f"[project] {label} must be relative to the project root")
 
     id_format = _require(id_table, "format", "[id]")
-    for token in ("{date}", "{type}", "{seq"):
+    for token in ("{date}", "{type}", "{rand}"):
         if token not in id_format:
             raise ProfileError(
-                f"[id] format must contain {{date}}, {{type}} and {{seq...}}; got {id_format!r}"
+                f"[id] format must contain {{date}}, {{type}} and {{rand}}; got {id_format!r}"
             )
-    owner = str(id_table.get("owner", "") or "")
-    if "{owner" in id_format and not owner:
-        raise ProfileError("[id] format uses {owner} but [id] owner is empty")
 
     required_for = design.get("required_for", ["L"])
     if not isinstance(required_for, list) or any(size not in SIZES for size in required_for):
@@ -371,6 +377,28 @@ def load(path: Path | str | None = None) -> Profile:
     release_gate_level = release.get("gate_level", "l3")
     if release_gate_level not in LEVELS:
         raise ProfileError("[release] gate_level must be one of l1, l2, l3")
+    release_mainline = release.get("mainline", "")
+    if not isinstance(release_mainline, str):
+        raise ProfileError("[release] mainline must be a branch name")
+    release_mainline = release_mainline.strip()
+    if release_channels and not release_mainline:
+        raise ProfileError(
+            '[release] mainline is required when channels are configured, e.g. mainline = "main"'
+        )
+    release_require_artifacts = release.get("require_artifacts", False)
+    if not isinstance(release_require_artifacts, bool):
+        raise ProfileError("[release] require_artifacts must be true or false")
+
+    requires = _require(flow_table, "requires", "[flow]").strip()
+    if not requires:
+        raise ProfileError(
+            "[flow] requires must be a version range, e.g. '>=0.3,<0.4'"
+        )
+    if not satisfies(__version__, requires):
+        raise ProfileError(
+            f"this project requires lite-dev {requires}, but this is {__version__}; "
+            "install the matching skill version"
+        )
 
     risk_paths = _string_list(
         reconcile.get("risk_paths", []), "[reconcile] risk_paths"
@@ -407,7 +435,7 @@ def load(path: Path | str | None = None) -> Profile:
 
     id_pattern = _id_pattern(id_format)
     try:
-        id_format.format(date="20000101", type="REQ", seq=1, owner=owner)
+        id_format.format(date="20000101", type="REQ", rand="abcde")
     except (KeyError, IndexError, ValueError) as exc:
         raise ProfileError(f"[id] format is invalid: {exc}") from exc
 
@@ -419,7 +447,6 @@ def load(path: Path | str | None = None) -> Profile:
         docs_dir=docs_dir,
         work_dir=work_dir,
         id_format=id_format,
-        owner=owner,
         commands=dict(commands),
         gate={level: list(steps) for level, steps in gate.items()},
         design_required_for=list(required_for),
@@ -428,9 +455,12 @@ def load(path: Path | str | None = None) -> Profile:
         release_channels=list(release_channels),
         release_dir=release_dir,
         release_gate_level=release_gate_level,
+        release_mainline=release_mainline,
+        release_require_artifacts=release_require_artifacts,
         risk_paths=list(risk_paths),
         extensions_enabled=list(extensions_enabled),
         extensions_dir=extensions_dir,
         extension_info=extension_info,
+        requires=requires,
         id_pattern=id_pattern,
     )

@@ -64,17 +64,26 @@ Three things make it different from a checklist:
    cp <skill>/profile.template.toml docs/flow/profile.toml
    ```
 
-   Edit `commands`, `gate`, and `docs.required`. This is the only file that
-   contains project-specific facts.
+   Edit `commands`, `gate`, `mainline`, `[flow] requires`, and `docs.required`.
+   This is the only file that contains project-specific facts.
 
-3. **Ask the agent.** "Set up lite-dev in this repo", or go straight to
+3. **Set your identity.** One value per person, on every machine:
+
+   ```bash
+   git config --global lite-dev.owner "Your Name"
+   ```
+
+   `new` refuses to guess: no owner, no item. `LITE_DEV_OWNER` and `--owner`
+   override it.
+
+4. **Ask the agent.** "Set up lite-dev in this repo", or go straight to
    "implement X". The skill triggers on implementation, fix, design, and release
    requests.
 
-4. **Check anytime.**
+5. **Check anytime.**
 
    ```bash
-   python3 <skill>/scripts/flow.py status
+   python3 <skill>/scripts/flow.py status --mine
    python3 <skill>/scripts/flow.py check
    ```
 
@@ -88,9 +97,10 @@ skills/lite-dev/            the installable skill: everything is inside
   references/               invariants + depth, loaded per situation
   templates/                item, design, test report, implementation, release, retro
   extensions/               bundled declarative add-ons (go-service)
-  scripts/flow.py           new / status / check / design-ready / gate / done /
-                            release / reconcile / extensions
-  scripts/flowlib/          profile, artifacts, checks, command runner
+  scripts/flow.py           new / claim / status / check / design-ready / gate /
+                            done / release / reconcile / extensions
+  scripts/flowlib/          profile, identity, artifacts, checks, command runner,
+                            atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
 examples/minimal/           a working single-repo project
 ```
@@ -99,12 +109,13 @@ examples/minimal/           a working single-repo project
 
 | Deterministic (`flow.py`) | Model |
 |---|---|
-| id allocation, directory scaffold | clarifying questions, trade-offs |
+| collision-resistant id allocation, directory scaffold | clarifying questions, trade-offs |
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
 | required fields, links, AC↔batch↔verification | code and tests |
 | design gate (confirmation, rollback, gaps) | failure diagnosis |
 | running profile commands, exit codes | black-box acceptance judgement |
+| release chain ordered by commit ancestry | deployment judgement |
 
 Anything left of the line is a script because agents self-report it badly.
 Anything right of the line is prose because a script would get it wrong.
@@ -128,18 +139,44 @@ flow.py extensions                     # what each add-on contributes
 ```
 
 `--record` runs the gate itself; a previous run is not evidence. It refuses a
-dirty tree, a channel branch, an empty rollback, or commits without work items
-that are not written into `--note`.
+dirty tree, a branch other than `release.mainline`, an empty rollback, a source
+that does not descend from the recorded tip, or commits without work items that
+are not written into `--note`.
 
 Extensions are declarative and additive: commands, gate steps, required docs,
 risk paths. The loader rejects command collisions, unknown keys, and an
 incompatible `requires` range.
 
+## Teams and multiple machines
+
+The flow is files plus git; there is no server, no lock service, and no network
+call. Three rules make that work for several people, several machines, and
+parallel agent sessions:
+
+- **Ids never need coordination.** `{date}-{type}-{rand}` gives every clone a
+  collision-resistant id. A prefix that matches two items is an error with the
+  candidates listed; the tool never guesses.
+- **Ownership is explicit.** `owner` is required and resolved from `--owner`,
+  `$LITE_DEV_OWNER`, or `git config lite-dev.owner` — never from `user.name`.
+  `claim` takes over an item and `status --mine` filters.
+- **Releases are ordered by the commit graph.** `--record` only runs on the
+  mainline, a stale clone is refused instead of recording an older source, and
+  an unreadable or divergent record stops the release.
+
+`gate --work <ID>` validates that item plus the required documents, so a
+teammate's unfinished item does not block your batch; a bare `check` and a
+release still validate everything. Writes are atomic (LF endings, `os.replace`)
+and local writers are serialized by a per-clone lock, so two agent sessions in
+one checkout cannot interleave a read-modify-write.
+
+Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
+
 ## Status
 
-The current release implements `new`, `status`, `check`, `design-ready`, `gate`,
-`done`, `release`, `reconcile`, `extensions`, the templates, the invariants, and
-a runnable single-repo example. Planned: a multi-repo workspace profile.
+The current release implements `new`, `claim`, `status`, `check`, `design-ready`,
+`gate`, `done`, `release`, `reconcile`, `extensions`, the templates, the
+invariants, and a runnable single-repo example. Planned: a multi-repo workspace
+profile.
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

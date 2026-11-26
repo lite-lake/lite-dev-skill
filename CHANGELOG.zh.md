@@ -2,7 +2,48 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
-## 未发布
+## 0.3.0 — 2026-11-26
+
+支持多人、多机与并行 Agent。任何共享事实都不再依赖本地扫描、文件名或本机时钟。
+
+1.0 之前：本项目尚未对外发布。不提供迁移路径，也不承诺兼容；1.0.0 才会是首个公开
+版本。
+
+### 破坏性变更
+
+- 条目 id 改为 `{date}-{type}-{rand}`（5 位随机字符）。移除 `{seq}`、`{owner}` 与
+  `[id] owner`；`[id] format` 必须包含 `{rand}`。
+- `owner` 成为条目必填字段。`new` 依次从 `--owner`、`$LITE_DEV_OWNER`、
+  `git config lite-dev.owner` 解析，取不到就拒绝，绝不猜。
+- `gate --work` 与 `check --work` 只校验指定条目加 profile 必需文档。裸 `check` 和
+  `release --record` 仍校验全量。
+- `release --record` 只在 `[release] mainline` 上执行。feature 分支、通道分支、
+  游离 HEAD 都会被拒绝；不是已记录 tip 后代的 source 也会被拒绝。
+- 发布记录新增 `by`、`tool`、`## Artifacts`；文件名包含 source 短 sha。水位线改为
+  渠道记录的祖先链 tip；读坏的记录、本克隆缺失的提交、落后的克隆、分叉的记录都报错，
+  而不是被跳过。
+- 配置了 channels 时 `[release] mainline` 必填。
+- `[flow] requires` 为必填，固定 lite-dev 版本；安装版本不匹配即为 profile 错误。
+
+### 新增
+
+- `claim <ID>`、`status --mine`、`check --work`、`release --by`、可重复的
+  `release --artifact`。
+- `flowlib/identity.py`、`flowlib/fsio.py`（原子 LF 写入、每克隆写者锁）、
+  `flowlib/errors.py`。
+- `references/collaboration.md`：身份、id、认领、trunk 假设、门禁范围、发布规则、
+  冲突处理、一人多机清单。
+- 不变量 13：身份抗碰撞，且从不猜。
+- 测试覆盖跨克隆 id、前缀歧义、条目级门禁、发布链校验（落后、分叉、断链、读坏）
+  以及 LF 写入。
+
+### 变更
+
+- 不变量 3、4、8：状态措辞、门禁范围、记录内容与祖先链水位线。
+- `reconcile --since` 必须是 HEAD 的祖先；无法排序的渠道退出 2。
+- 所有平台上的写入都是原子的、使用 LF 换行；同一克隆内的两个会话会串行化读改写。
+
+## 0.2.1 — 2026-11-26
 
 ### 新增
 
@@ -13,16 +54,11 @@
 
 ### 变更
 
-- 从两份 README 中删除了 `(v0.1)` 版本号，遵守不变量 9「入口文档不含版本号」。
-  正文改为「不是多仓库编排器。仅支持单仓库。」
-
-## 0.2.1 — 2026-11-26
-
-### 变更
-
 - 许可从 MIT 改为 BSD 2-Clause。更新 `LICENSE`、`skills/lite-dev/SKILL.md` 的
   `license` 字段，以及 `README.md` 和 `README.zh.md` 中的许可说明。无代码或协议变更。
 - `__version__` 现为 `0.2.1`。`v0.2.0` 保持已发布状态，仍为 MIT。
+- 从两份 README 中删除了 `(v0.1)` 版本号，遵守不变量 9「入口文档不含版本号」。
+  正文改为「不是多仓库编排器。仅支持单仓库。」
 
 ## 打包 — lite-dev-skill
 

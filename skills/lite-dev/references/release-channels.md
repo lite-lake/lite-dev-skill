@@ -8,6 +8,8 @@ prod exists. A small project may have none. A framework may add a release train.
 channels = ["staging", "prod"]
 dir = "docs/releases"
 gate_level = "l3"        # must exist in [gate]
+mainline = "main"        # required once a channel exists
+require_artifacts = false
 ```
 
 ## Commands
@@ -17,30 +19,48 @@ flow.py release                              # channels and the last record per 
 flow.py release --channel staging            # plan only: source, previous, commits, debt
 flow.py release --channel staging --record \
   --rollback "redeploy <previous tag>" \
+  --artifact "app@sha256:..." \
   --note "two chore commits have no work item"
 ```
 
 `--record` is the only way to write a release. It enforces, in order:
 
 1. `check` passes: broken artifacts block a release.
-2. `gate_level` passes: FAIL means no record.
-3. The working tree is clean.
-4. The current branch is not one of the release channels.
-5. `--rollback` is non-empty.
+2. The working tree is clean.
+3. The current branch is `[release] mainline`; a feature branch and a detached
+   HEAD are refused.
+4. The channel's records form one unbroken chain, and HEAD descends from its tip.
+5. `--rollback` is non-empty; `--artifact` is present when the profile requires it.
 6. Commits without work items are written into `--note`.
+7. `gate_level` passes: FAIL means no record. The gate runs inside `--record`;
+   a previous run is not evidence.
 
-The gate runs inside `--record`; a previous run is not evidence.
+The recorder and the tool version are stored in the record (`by`, `tool`).
 
 ## Watermark
 
-The latest record for the channel is the watermark. `source` is the commit the
-release was cut from, `previous` is the record before it. `reconcile` and the
-next `release` use `source` to decide what is new. Do not edit a recorded
-`source`; write a new record instead.
+Records are ordered by the **commit graph**, never by filename or local clock.
+The tip is the record no other record descends from, so two machines that record
+independently cannot disagree about which one is latest.
+
+- `source` is the commit the release was cut from; `previous` is the source of
+  the record before it, or `none` for the first one.
+- A record whose `source` or `previous` is missing from the clone stops the
+  release: fetch first.
+- A source that is not a descendant of the tip means this clone is behind or on
+  a different history. Pull or rebase; the tool will not record an older source.
+- Two records that are not on one history are divergent. The channel is broken
+  until someone records again from the true tip — do not delete the evidence.
+- An unreadable record (missing or non-sha `source`) is an error, not a record
+  to skip.
+
+Do not edit a recorded `source` or `previous`; write a new record instead.
 
 The record is rendered from `templates/release.md`; headings and frontmatter
-keys are a parsing contract. Commit the record before the next release;
-otherwise the working tree is dirty and `--record` refuses to run.
+keys are a parsing contract. The filename contains the date and the short
+source (`staging-20261031-a1b2c3.md`), so records from different machines do not
+collide. Commit the record before the next release; otherwise the working tree
+is dirty and `--record` refuses to run.
 
 ## Promotion and rollback
 

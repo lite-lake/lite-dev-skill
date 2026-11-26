@@ -3,7 +3,10 @@
 Covers both execution modes:
   S item: new -> clarify -> check -> gate -> done
   L item: new -> design -> design-ready -> gate -> done
+and the multi-clone case: two clones create items on the same day without
+talking to each other, and neither id collides after they merge.
 """
+import os
 import re
 import shutil
 import subprocess
@@ -36,20 +39,29 @@ class AcceptanceTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def run_flow(self, *args: str) -> subprocess.CompletedProcess:
+    def run_flow(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        env = dict(os.environ, LITE_DEV_OWNER="acceptance")
         return subprocess.run(
             [sys.executable, str(FLOW), *args],
-            cwd=self.root,
+            cwd=cwd or self.root,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
 
-    def only_item(self, marker: str) -> Path:
-        directories = sorted((self.root / "docs/work").glob(f"*{marker}*"))
-        self.assertEqual(len(directories), 1, directories)
-        return directories[0]
+    def created_id(self, result: subprocess.CompletedProcess) -> str:
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        match = re.search(r"^created (\S+)$", result.stdout, re.M)
+        self.assertIsNotNone(match, result.stdout)
+        return match.group(1)
+
+    def item_dir(self, item_id: str, root: Path | None = None) -> Path:
+        base = (root or self.root) / "docs/work"
+        matches = [path for path in base.iterdir() if path.is_dir() and path.name.startswith(item_id)]
+        self.assertEqual(len(matches), 1, matches)
+        return matches[0]
 
     def clarify_and_fill_ac(self, directory: Path, first: str, second: str) -> None:
         path = directory / "item.md"
@@ -74,9 +86,10 @@ class AcceptanceTest(unittest.TestCase):
         self.assertIn("no work items", status.stdout)
 
         # --- S item: one-shot ---
-        created = self.run_flow("new", "--title", "Export CSV", "--type", "REQ", "--size", "S")
-        self.assertEqual(created.returncode, 0, created.stderr)
-        small = self.only_item("-REQ-01-")
+        small_id = self.created_id(
+            self.run_flow("new", "--title", "Export CSV", "--type", "REQ", "--size", "S")
+        )
+        small = self.item_dir(small_id)
         self.clarify_and_fill_ac(
             small,
             "exporting a list returns a CSV file",
@@ -90,24 +103,22 @@ class AcceptanceTest(unittest.TestCase):
         self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
         self.assertIn("PASS", gate.stdout)
 
-        early = self.run_flow("done", item_id(small))
+        early = self.run_flow("done", small_id)
         self.assertEqual(early.returncode, 1)
         self.assertIn("unchecked AC", early.stdout)
 
         self.tick_all_ac(small)
-        done = self.run_flow("done", item_id(small))
+        done = self.run_flow("done", small_id)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
         # --- L item: two-phase ---
-        created = self.run_flow(
-            "new", "--title", "Add Audit Log", "--type", "REQ", "--size", "L"
+        large_id = self.created_id(
+            self.run_flow("new", "--title", "Add Audit Log", "--type", "REQ", "--size", "L")
         )
-        self.assertEqual(created.returncode, 0, created.stderr)
-        large = self.only_item("-REQ-02-")
+        large = self.item_dir(large_id)
         self.clarify_and_fill_ac(
             large, "every write emits an audit line", "the audit log is queryable"
         )
-        large_id = item_id(large)
 
         design = (SKILL / "templates/design.md").read_text(encoding="utf-8")
         replacements = {
@@ -145,9 +156,39 @@ class AcceptanceTest(unittest.TestCase):
         final = self.run_flow("status")
         self.assertEqual(final.returncode, 0)
         self.assertIn("done 2", final.stdout)
+        self.assertIn("acceptance", final.stdout)
 
         check = self.run_flow("check")
         self.assertEqual(check.returncode, 0, check.stdout)
+
+    def test_two_clones_allocate_distinct_ids(self) -> None:
+        first_id = self.created_id(
+            self.run_flow("new", "--title", "Same Title", "--type", "REQ", "--size", "S")
+        )
+        other = Path(self._tmp.name) / "other"
+        shutil.copytree(EXAMPLE, other)
+        second_id = self.created_id(
+            self.run_flow(
+                "new", "--title", "Same Title", "--type", "REQ", "--size", "S", cwd=other
+            )
+        )
+        self.assertNotEqual(first_id, second_id)
+
+        # Merge the second clone's work item into the first, as git would.
+        shutil.copytree(
+            other / "docs/work" / f"{second_id}-Same-Title",
+            self.root / "docs/work" / f"{second_id}-Same-Title",
+        )
+        check = self.run_flow("check")
+        self.assertEqual(check.returncode, 0, check.stdout)
+
+        for root, created in ((self.root, first_id), (self.root, second_id)):
+            directory = self.item_dir(created, root=root)
+            self.clarify_and_fill_ac(directory, "one", "two")
+            self.tick_all_ac(directory)
+            done = self.run_flow("done", created)
+            self.assertEqual(done.returncode, 0, done.stdout)
+            self.assertNotIn("ambiguous", done.stdout)
 
 
 if __name__ == "__main__":

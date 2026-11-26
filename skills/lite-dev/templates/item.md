@@ -5,6 +5,7 @@ type: <TYPE>
 priority: <PRIORITY>
 size: <SIZE>
 mode: <MODE>
+owner: <OWNER>
 created: <DATE>
 closed:
 ---

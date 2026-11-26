@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import fsio
+from .errors import FlowError
 from .profile import Profile
 
 FM_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", re.S)
@@ -19,7 +21,7 @@ CLARIFIED = {"clarified", "confirmed", "ready", "已澄清", "已确认", "无�
 DROPPED = {"dropped", "cancelled", "canceled", "已放弃"}
 PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
 
-ITEM_FIELDS = ("id", "title", "type", "priority", "size", "mode", "created")
+ITEM_FIELDS = ("id", "title", "type", "priority", "size", "mode", "owner", "created")
 
 
 def read_text(path: Path) -> str:
@@ -56,9 +58,9 @@ def set_frontmatter_value(path: Path, key: str, value: str) -> None:
             break
     else:
         lines.append(f"{key}: {value}")
-    path.write_text(
+    fsio.atomic_write_text(
+        path,
         "---\n" + "\n".join(lines) + "\n---\n" + match.group(2),
-        encoding="utf-8",
     )
 
 
@@ -221,12 +223,27 @@ def all_items(profile: Profile) -> list[Item]:
 
 
 def find_item(profile: Profile, item_id: str) -> Item:
-    for item in all_items(profile):
-        if item.id == item_id:
-            return item
-        if item.directory.name == item_id or item.directory.name.startswith(item_id + "-"):
-            return item
-    raise SystemExit(f"work item not found: {item_id}")
+    """Resolve an id exactly, or by a unique prefix. Never guess between matches."""
+    query = (item_id or "").strip()
+    if not query:
+        raise FlowError("work item id is empty")
+    items = all_items(profile)
+    exact = [item for item in items if item.id == query or item.directory.name == query]
+    matches = exact or [
+        item
+        for item in items
+        if item.id.startswith(query) or item.directory.name.startswith(query)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise FlowError(f"work item not found: {query}")
+    lines = [f"ambiguous work item {query!r}: {len(matches)} matches"]
+    for item in matches:
+        title = item.meta.get("title", "")
+        lines.append(f"  {item.id}  {title}  ({item.status})")
+    lines.append("use the full id (flow.py status lists them)")
+    raise FlowError("\n".join(lines))
 
 
 def ac_ids(item: Item) -> list[str]:

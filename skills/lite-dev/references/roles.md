@@ -43,5 +43,7 @@ Input: item id, batch id, changed repos.
 
 - Run the full gate: `flow.py gate --level l3 --work <ID>` (or the profile's commit level).
 - One commit per repo per batch. Message: `<type>: <module>-<summary> (<ID>)`.
-- Pull with rebase, push the main branch, record commit hashes in `implementation.md`.
+- Integrate the mainline without rewriting it: merge it in (fast-forward when
+  possible) and push. Never force-push the mainline; a rewritten mainline
+  orphans recorded release watermarks. Record commit hashes in `implementation.md`.
 - Do not change code. If the gate fails, return to implement.

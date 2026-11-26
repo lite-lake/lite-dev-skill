@@ -22,8 +22,16 @@ class Commit:
 
 
 def _run(root: Path, *args: str, check: bool = True) -> str:
+    process = _exec(root, *args)
+    if check and process.returncode != 0:
+        message = (process.stderr or process.stdout).strip()
+        raise GitError(message or f"git {' '.join(args)} failed")
+    return process.stdout
+
+
+def _exec(root: Path, *args: str) -> subprocess.CompletedProcess:
     try:
-        process = subprocess.run(
+        return subprocess.run(
             ["git", *args],
             cwd=root,
             capture_output=True,
@@ -33,15 +41,35 @@ def _run(root: Path, *args: str, check: bool = True) -> str:
         )
     except FileNotFoundError as exc:
         raise GitError("git is not installed or not on PATH") from exc
-    if check and process.returncode != 0:
-        message = (process.stderr or process.stdout).strip()
-        raise GitError(message or f"git {' '.join(args)} failed")
-    return process.stdout
 
 
 def is_repo(root: Path) -> bool:
     output = _run(root, "rev-parse", "--is-inside-work-tree", check=False).strip()
     return output == "true"
+
+
+def config_get(root: Path, key: str) -> str:
+    """Read a git config value; empty when it is not set."""
+    return _run(root, "config", "--get", key, check=False).strip()
+
+
+def has_commit(root: Path, sha: str) -> bool:
+    if not sha or sha == "none":
+        return False
+    return _exec(root, "cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+
+
+def is_ancestor(root: Path, older: str, newer: str) -> bool:
+    """True when `older` is `newer` or reachable from it."""
+    if older == newer:
+        return True
+    return _exec(root, "merge-base", "--is-ancestor", older, newer).returncode == 0
+
+
+def rev_list(root: Path, *args: str) -> list[str]:
+    """Run rev-list and return full shas in the order git prints them."""
+    output = _run(root, "rev-list", *args)
+    return [line.strip() for line in output.splitlines() if line.strip()]
 
 
 def ensure_repo(root: Path) -> None:

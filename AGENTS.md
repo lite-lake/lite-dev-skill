@@ -41,7 +41,9 @@ every template.
   `new → check → status → design-ready → gate → done`.
 - Update `CHANGELOG.md` **and** `CHANGELOG.zh.md`; note breaking changes
   explicitly. Same for `README.md` / `README.zh.md`.
-- If you changed an invariant, bump the major version and say so in the changelog.
+- Nothing is published before 1.0.0: change the protocol freely and keep both
+  changelogs honest. From 1.0.0, a change to an invariant requires a major
+  version bump and a breaking-change note.
 
 ## Style
 

@@ -4,9 +4,11 @@ language = "en"
 docs_dir = "docs"
 work_dir = "docs/work"
 
+[flow]
+requires = ">=0.3,<0.4"
+
 [id]
-format = "{date}-{type}-{seq:02d}"
-owner = ""
+format = "{date}-{type}-{rand}"
 
 [gate]
 l1 = ["test"]
@@ -30,6 +32,7 @@ required = ["README.md", "AGENTS.md", "docs/README.md"]
 channels = []
 dir = "docs/releases"
 gate_level = "l3"
+mainline = "main"
 
 [reconcile]
 risk_paths = []

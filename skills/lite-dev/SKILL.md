@@ -42,6 +42,7 @@ Never edit a status by hand.
 | Phase B implementation | [references/roles.md](references/roles.md) | `gate --level l1` per batch |
 | Harness has no subagents | [references/harness-modes.md](references/harness-modes.md) | sequential roles |
 | Releasing | [references/release-channels.md](references/release-channels.md) | `release --channel <name>` |
+| More than one person or machine | [references/collaboration.md](references/collaboration.md) | set `lite-dev.owner`, then `new` |
 | Others bypassed the flow | [references/reconcile.md](references/reconcile.md) | `reconcile` |
 | A project ships an extension | [references/extensions.md](references/extensions.md) | `extensions` |
 | Stuck or repeated failure | [references/anti-patterns.md](references/anti-patterns.md) | — |
@@ -74,24 +75,31 @@ Phase A is the design session. Phase B is a scheduling session that dispatches
 
 ```bash
 python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
-python3 <skill>/scripts/flow.py status
-python3 <skill>/scripts/flow.py check
+python3 <skill>/scripts/flow.py status --mine
+python3 <skill>/scripts/flow.py check [--work <ID>]
 python3 <skill>/scripts/flow.py design-ready <ID>
 python3 <skill>/scripts/flow.py gate --level l1 --work <ID>
+python3 <skill>/scripts/flow.py claim <ID>
 python3 <skill>/scripts/flow.py done <ID>
 python3 <skill>/scripts/flow.py release --channel staging
 python3 <skill>/scripts/flow.py reconcile
 python3 <skill>/scripts/flow.py extensions
 ```
 
-- `new` allocates the id and creates `<work_dir>/<id>-<slug>/item.md`.
-- `check` validates fields, AC, links, and design rules; exit 1 on errors.
+- `new` allocates `{date}-{type}-{rand}` and creates `<work_dir>/<id>-<slug>/item.md`;
+  it needs an identity (`--owner`, `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
+- `check` validates fields, AC, links, and design rules; `--work` limits it to one item.
 - `design-ready` refuses an incomplete design and writes `status: ready`.
-- `gate` runs the profile's commands for a level; `check` runs first.
+- `gate` validates the item under `--work` (or the whole project), then runs the
+  profile's commands for a level.
+- `claim` reassigns the owner; commit it so teammates see the change.
 - `done` refuses unchecked AC and a missing required design.
 - `release` plans; `--record` runs the gate and writes the channel record.
 - `reconcile` reports commits that bypassed the flow; it never blocks.
 - `extensions` shows what each enabled extension adds.
+
+An id may be abbreviated to a unique prefix. Two matches is an error with the
+candidates listed: use the full id, never guess.
 
 ### 5.1 Release and reconcile
 
@@ -129,7 +137,8 @@ batch the main branch builds and passes the gate.
 - Levels and commands come from `docs/flow/profile.toml`. Never invent a command.
 - `l1` runs on every batch, `l2` before batch acceptance, `l3` before commit or release.
 - A failing gate is fixed, not argued with. The same failure three times means stop and ask.
-- `gate` runs `check` first: broken artifacts cannot pass a gate.
+- `gate --work <ID>` validates that item and the profile's required documents,
+  then runs the commands. A bare `check` and a release still validate the project.
 
 ## 8. Independent verification
 
@@ -158,6 +167,8 @@ An implementer saying "tested" is not evidence.
 - A verifier approving their own implementation.
 - Listing only "this round" of batches and deferring the rest.
 - Leaving half-done work on main without a flag.
+- Guessing which item an ambiguous id means, or editing an id by hand.
+- Editing a recorded release's `source` or `previous`.
 - Force push, rewriting shared history, committing secrets.
 - Weakening a core rule through an extension.
 
@@ -167,6 +178,7 @@ An implementer saying "tested" is not evidence.
 - [One-shot vs two-phase](references/one-shot-vs-two-phase.md)
 - [Roles](references/roles.md)
 - [Harness modes](references/harness-modes.md)
+- [Teams and machines](references/collaboration.md)
 - [Release channels](references/release-channels.md)
 - [Reconcile](references/reconcile.md)
 - [Extensions](references/extensions.md)

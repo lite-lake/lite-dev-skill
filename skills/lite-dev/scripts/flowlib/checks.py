@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from pathlib import Path
 
 from . import artifacts
 from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile
@@ -155,6 +154,12 @@ def item_errors(item: artifacts.Item, profile: Profile) -> list[str]:
     ):
         errors.append(f"{label}: directory name must start with the item id {item.id}")
 
+    if item.id and not profile.id_pattern.search(item.id):
+        errors.append(
+            f"{label}: id {item.id!r} does not match [id] format {profile.id_format!r}; "
+            "rename the directory, then update 'id' and design.md 'item' to a current id"
+        )
+
     if item.meta.get("type") and item.meta["type"] not in TYPES:
         errors.append(f"{label}: type {item.meta['type']!r} must be one of {', '.join(TYPES)}")
     if item.meta.get("size") and item.meta["size"] not in SIZES:
@@ -165,9 +170,9 @@ def item_errors(item: artifacts.Item, profile: Profile) -> list[str]:
         )
     if item.meta.get("mode") and item.meta["mode"] not in MODES:
         errors.append(f"{label}: mode {item.meta['mode']!r} must be one-shot or two-phase")
-    if item.id and not item.id.startswith(item.meta.get("created", "").replace("-", "")):
-        if item.meta.get("created"):
-            errors.append(f"{label}: id {item.id} does not start with created date")
+    created = item.meta.get("created", "").replace("-", "")
+    if item.id and created and created not in item.id:
+        errors.append(f"{label}: id {item.id} does not contain the created date {item.meta.get('created')}")
 
     if item.ac_total == 0:
         errors.append(f"{label}: ## AC has no AC01-style entries")
@@ -214,7 +219,14 @@ def item_warnings(item: artifacts.Item, profile: Profile) -> list[str]:
     return warnings
 
 
-def check_project(profile: Profile) -> tuple[list[str], list[str]]:
+def check_project(
+    profile: Profile, work: str | None = None
+) -> tuple[list[str], list[str]]:
+    """Validate the project, or only one item when `work` is given.
+
+    `gate --work` must not fail because a teammate's unrelated item is broken;
+    the release path and a bare `check` still validate everything.
+    """
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -223,12 +235,18 @@ def check_project(profile: Profile) -> tuple[list[str], list[str]]:
             errors.append(f"missing required document: {relative}")
 
     items = artifacts.all_items(profile)
-    ids: dict[str, Path] = {}
+    by_id: dict[str, list[str]] = {}
     for item in items:
         if item.id:
-            if item.id in ids:
-                errors.append(f"duplicate item id {item.id} in {item.directory.name} and {ids[item.id].name}")
-            ids[item.id] = item.directory
+            by_id.setdefault(item.id, []).append(item.directory.name)
+
+    scoped = [artifacts.find_item(profile, work)] if work else items
+    for item in scoped:
+        others = [name for name in by_id.get(item.id, []) if name != item.directory.name]
+        if others:
+            errors.append(
+                f"duplicate item id {item.id} in {item.directory.name} and {', '.join(others)}"
+            )
 
         errors.extend(item_errors(item, profile))
         warnings.extend(item_warnings(item, profile))
