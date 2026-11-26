@@ -229,6 +229,10 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
     lines.append(f"1. {_relative(profile, item.path)}")
     if item.design_path is not None:
         lines.append(f"2. {_relative(profile, item.design_path)}")
+    for label, key in (("PRD", "prd"), ("Board", "board")):
+        value = (item.meta.get(key) or "").strip()
+        if value:
+            lines.append(f"- {label}: {value}")
     lines.append("")
 
     handoff = artifacts.section(item.design_body, "Handoff", "交接摘要")

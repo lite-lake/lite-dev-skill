@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from . import artifacts, docs, git, identity
+from .errors import FlowError
 from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile
 
 DESIGN_SECTIONS = (
@@ -426,7 +427,17 @@ def owner_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
 
 
 def _path_matches(path: str, prefixes: list[str]) -> bool:
-    return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
+    """True when `path` is one of `prefixes` or lives under one.
+
+    The separator matters: a prefix is a directory, not a string. Without the
+    boundary `lite-backend` silently covers `lite-backend-tools/`, which is a
+    different repository and a different risk decision.
+    """
+    for prefix in prefixes:
+        clean = prefix.rstrip("/")
+        if path == clean or path.startswith(clean + "/"):
+            return True
+    return False
 
 
 def paths_matching(paths: list[str], prefixes: list[str]) -> list[str]:
@@ -459,10 +470,17 @@ class ChangeSet:
     that belong to nobody's item. Keeping the two sources apart lets a risk or
     fallback warning say which one it saw, so the reader can tell "this is my
     change" from "this was already dirty".
+
+    In a workspace every path is prefixed with its repository, so one report and
+    one risk list describe the whole change. A repository that is missing or
+    unreadable is reported instead of being treated as an empty change: silence
+    there would turn "no risk path touched" into a lie.
     """
 
     worktree: list[str] = field(default_factory=list)
     committed: list[str] = field(default_factory=list)
+    unavailable: list[str] = field(default_factory=list)
+    incomplete: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.worktree = list(dict.fromkeys(self.worktree))
@@ -471,6 +489,21 @@ class ChangeSet:
     @property
     def paths(self) -> list[str]:
         return list(dict.fromkeys([*self.worktree, *self.committed]))
+
+    @property
+    def degraded(self) -> list[str]:
+        """Warnings for what could not be inspected, phrased as what to fix."""
+        messages: list[str] = []
+        if self.unavailable:
+            messages.append(
+                "not a git work tree, so its changes are invisible here: "
+                + ", ".join(self.unavailable)
+                + " (fetch the checkout, or declare [[workspace.repo]] only for "
+                "repositories every machine has)"
+            )
+        for entry in self.incomplete:
+            messages.append(f"could not read git history for {entry}")
+        return messages
 
     def label(self, path: str) -> str:
         in_worktree = path in self.worktree
@@ -512,6 +545,14 @@ def risk_gate(
     return [], [message]
 
 
+def _has_history(root) -> bool:
+    """A repository with no commit yet has no history to search, not an error."""
+    try:
+        return bool(git.head(root))
+    except git.GitError:
+        return False
+
+
 def changed_paths(profile: Profile, item: artifacts.Item) -> ChangeSet:
     """The item's work: uncommitted paths plus paths in its own commits.
 
@@ -520,17 +561,143 @@ def changed_paths(profile: Profile, item: artifacts.Item) -> ChangeSet:
     reports "no risk path" for a change that touched one. The worktree
     participates because the change under the gate is often not committed yet;
     the label keeps that provenance visible.
+
+    Every declared repository is visited, and its paths are prefixed with the
+    repository so a single risk list covers the whole workspace.
     """
     changed = ChangeSet()
-    try:
-        if not git.is_repo(profile.root):
-            return changed
-        changed.worktree = git.worktree_paths(profile.root)
-        owned = git.commits_matching(profile.root, item.id) if item.id else []
-        changed.committed = git.files_many(profile.root, [commit.sha for commit in owned])
-    except git.GitError:
-        return changed
+    for repo in profile.workspace_repos:
+        repo_root = profile.repo_root(repo.path)
+        try:
+            if not git.is_repo(repo_root):
+                changed.unavailable.append(repo.name)
+                continue
+            changed.worktree.extend(
+                profile.to_workspace(repo.path, path)
+                for path in git.worktree_paths(repo_root)
+            )
+            if item is not None and item.id and _has_history(repo_root):
+                owned = git.commits_matching(repo_root, item.id)
+                changed.committed.extend(
+                    profile.to_workspace(repo.path, path)
+                    for path in git.files_many(repo_root, [c.sha for c in owned])
+                )
+        except git.GitError as exc:
+            changed.incomplete.append(f"{repo.name}: {exc}")
     return changed
+
+
+BATCH_REPO_COLUMNS = ("Repo", "仓库")
+REPO_ONLY = {"-", "—", ""}
+
+
+def design_repos(item: artifacts.Item) -> list[str]:
+    """Repositories named by the design's batch table.
+
+    The column has always been in the template and in the handoff prompt; the
+    gate now reads it, which is how a change that has no commit yet still names
+    where it lands. `.` means the control repository, the pre-workspace default.
+    """
+    found: list[str] = []
+    for row in item.batches:
+        value = artifacts.row_value(row, *BATCH_REPO_COLUMNS).strip()
+        for entry in re.split(r"[,，;；\s]+", value):
+            entry = entry.strip().strip("`")
+            if entry in REPO_ONLY:
+                continue
+            entry = "" if entry == "." else entry.rstrip("/")
+            if entry not in found:
+                found.append(entry)
+    return found
+
+
+@dataclass
+class Scope:
+    """Which repositories a gate run covers, and why."""
+
+    repos: list[str]
+    reason: str
+    warnings: list[str] = field(default_factory=list)
+
+
+def scope(
+    profile: Profile, item: artifacts.Item | None, explicit: list[str] | None = None
+) -> Scope:
+    """Decide which repositories a gate run inspects.
+
+    Order: an explicit `--repo`, the repositories whose history mentions the
+    item, the repositories with uncommitted work, the design's Repo column, and
+    finally every repository with a warning. The last step is the important one:
+    a workspace gate must never narrow silently.
+    """
+    declared = {repo.path for repo in profile.workspace_repos}
+    labels = {repo.path: repo.name for repo in profile.workspace_repos}
+    explicit = [entry for entry in (explicit or []) if entry is not None]
+    if explicit:
+        wanted: list[str] = []
+        for entry in explicit:
+            clean = entry.strip().rstrip("/")
+            if clean in (".", "./", ""):
+                clean = profile.control_path
+            if clean not in declared:
+                raise FlowError(
+                    f"--repo {entry!r} is not a declared repository; known: "
+                    + ", ".join(sorted(repo.name for repo in profile.workspace_repos))
+                )
+            if clean not in wanted:
+                wanted.append(clean)
+        return Scope(repos=wanted, reason="--repo")
+
+    everything = [repo.path for repo in profile.workspace_repos]
+    if item is None:
+        return Scope(repos=everything, reason="project-wide")
+
+    warnings: list[str] = []
+    found: list[str] = []
+    reason = ""
+    for repo in profile.workspace_repos:
+        repo_root = profile.repo_root(repo.path)
+        try:
+            if not git.is_repo(repo_root):
+                continue
+            if git.commits_matching(repo_root, item.id):
+                found.append(repo.path)
+        except git.GitError:
+            continue
+    if found:
+        reason = "commits"
+    if not found:
+        for repo in profile.workspace_repos:
+            repo_root = profile.repo_root(repo.path)
+            try:
+                if git.is_repo(repo_root) and git.worktree_paths(repo_root):
+                    found.append(repo.path)
+            except git.GitError:
+                continue
+        if found:
+            reason = "worktree"
+    if not found:
+        named = design_repos(item)
+        for entry in named:
+            if entry in declared:
+                if entry not in found:
+                    found.append(entry)
+            else:
+                warnings.append(
+                    f"design.md names repo {entry!r}, which is not a declared "
+                    "repository; add [[workspace.repo]] for it or fix the batch table"
+                )
+        reason = "design Repo column" if found else ""
+    if not found:
+        if len(everything) > 1:
+            warnings.append(
+                f"cannot tell which repositories {item.id} touches; running every "
+                "declared repository ("
+                + ", ".join(labels[path] for path in everything)
+                + "). Pass --repo or fill the design's Repo column"
+            )
+        return Scope(repos=everything, reason="all", warnings=warnings)
+    return Scope(repos=found, reason=reason, warnings=warnings)
 
 
 def fallback_warnings(profile: Profile, level: str, changed: ChangeSet) -> list[str]:
@@ -583,9 +750,9 @@ def quotepath_warnings(profile: Profile, items: list[artifacts.Item]) -> list[st
     if not any(artifacts.CJK_RE.search(item.directory.name) for item in items):
         return []
     try:
-        if not git.is_repo(profile.root):
+        if not git.is_repo(profile.control_root):
             return []
-        if git.config_get(profile.root, "core.quotepath").strip().lower() == "false":
+        if git.config_get(profile.control_root, "core.quotepath").strip().lower() == "false":
             return []
     except git.GitError:
         return []
@@ -706,6 +873,12 @@ def check_project(
             for target in artifacts.relative_links(path, text):
                 if not (path.parent / target).exists():
                     errors.append(f"{path.relative_to(profile.root)}: broken link {target}")
+        prd = (item.meta.get("prd") or "").strip()
+        if prd and not (profile.root / prd).exists():
+            errors.append(
+                f"{item.directory.name}/item.md: prd {prd!r} does not exist; point at "
+                "the requirement's real path or remove the field"
+            )
         if item.design_path is not None:
             for target in artifacts.relative_links(
                 item.design_path, artifacts.read_text(item.design_path)

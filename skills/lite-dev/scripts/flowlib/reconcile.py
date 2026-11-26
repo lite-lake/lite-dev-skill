@@ -80,8 +80,16 @@ def _risky(profile: Profile, paths: list[str]) -> list[str]:
     return sorted(found)
 
 
+def _channel_repo(profile: Profile, channel: str) -> str:
+    bound = profile.channel(channel)
+    return bound.repo if bound else profile.control_path
+
+
 def collect(profile: Profile, channel: str, since: str | None = None) -> Debt:
-    git.ensure_repo(profile.root)
+    """Debt in one channel's repository, reported in workspace paths."""
+    repo = _channel_repo(profile, channel)
+    root = profile.repo_root(repo)
+    git.ensure_repo(root)
     known = {
         item.id
         for item in artifacts.all_items(profile) + artifacts.archived_items(profile)
@@ -90,13 +98,15 @@ def collect(profile: Profile, channel: str, since: str | None = None) -> Debt:
     debt = Debt(
         channel=channel,
         since=since,
-        head=git.head(profile.root),
-        total=git.total_commits(profile.root, since),
+        head=git.head(root),
+        total=git.total_commits(root, since),
     )
-    for commit in git.commits(profile.root, since):
+    for commit in git.commits(root, since):
         text = f"{commit.subject}\n{commit.body}"
         ids = list(dict.fromkeys(profile.id_pattern.findall(text)))
-        paths = git.files(profile.root, commit.sha)
+        paths = [
+            profile.to_workspace(repo, path) for path in git.files(root, commit.sha)
+        ]
         risky = _risky(profile, paths)
         valid = [item_id for item_id in ids if item_id in known]
         if risky:
@@ -113,7 +123,7 @@ def collect(profile: Profile, channel: str, since: str | None = None) -> Debt:
         missing = [item_id for item_id in ids if item_id not in known]
         if missing:
             debt.missing_item.append((commit, missing[0]))
-    debt.dirty = git.dirty(profile.root)
+    debt.dirty = git.dirty(root)
     return debt
 
 

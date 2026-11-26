@@ -51,6 +51,10 @@ that teaches people to ignore the file.
   `done` requires a PASS for the item at the strictest level in this clone; a
   project-wide run does not name the item. `gate --work` warns or refuses a
   risk-path change without a ready design, according to `[design] risk_gate`.
+  In a workspace the gate is scoped to the repositories the change touches
+  (commits, then the worktree, then the design's Repo column, then all with a
+  warning), and a declared repository that is not checked out is named as an
+  inspection the level did not perform — never silently dropped.
 
 ## 5. Implementation and verification are different contexts
 
@@ -91,6 +95,8 @@ that teaches people to ignore the file.
 ## 8. Releases are recorded; bypass is visible, not blocked
 
 - Channel branches are fast-forward only; never commit on them.
+- In a workspace a channel is bound to one repository and its chain is ordered
+  by that repository's history; a record names the repository its shas belong to.
 - Every release records the source commit, who recorded it, the lite-dev version,
   gate/smoke results, the configured artefacts, and a rollback target.
 - Records form one chain per channel; the watermark is the ancestry tip of that
@@ -135,8 +141,11 @@ that teaches people to ignore the file.
   files, unmentioned item artifacts, archive-index drift, duplicate headings in
   a release record, version/port/date/count pins in entry documents, broken
   decision chains, expired or unused exemptions, and a disabled or inert check.
-  Record stores (work items, release records, `_archive/`) are excluded from the
-  link index. Whether the prose is true is still human.
+  Absolute link targets and links that leave the project root are reported (a
+  link that stays inside a declared repository is not an escape). Record stores
+  (work items, release records, `_archive/`, and the directories named in
+  `[docs] stores`) are excluded from the link index. Whether the prose is true is
+  still human.
 
 ## 10. Extensions may add, never remove
 
@@ -174,8 +183,10 @@ that teaches people to ignore the file.
   allocations that stamp the same millisecond collide; `new` bumps past a code
   already on disk, and `check` reports a duplicate id rather than merging the
   two items.
-- Every item records its owner; the owner comes from an explicit identity, never
-  from a machine's `user.name`. Reassigning an open item that another person
+- Every item records its owner; the owner comes from an explicit identity —
+  `--owner`, `$LITE_DEV_OWNER`, `git config lite-dev.owner` in the control or
+  root repository, then the project's `owner_file` — never from `user.name`.
+  Reassigning an open item that another person
   owns requires an explicit `--takeover --reason "..."`, and closing an item
   requires an identity and records who closed it. A closed item cannot be
   claimed, and an archived item is read-only until unarchived.
@@ -193,7 +204,9 @@ that teaches people to ignore the file.
 ## Compatibility
 
 - The profile may set sizes, commands, channels, id format, mainline branch,
-  identity policy, and languages.
+  identity policy, languages, the project root, the control repository, the
+  declared repositories, document stores and surfaces, and each command's
+  working directory.
 - An extension version must state the lite-dev version range it supports.
 - Nothing is published before 1.0.0, so this file may change freely. 1.0.0 is
   the first public release; from then on, a change to this file is a breaking

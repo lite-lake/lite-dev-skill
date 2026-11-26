@@ -47,6 +47,7 @@ Never edit a status by hand.
 | Harness has no subagents | [references/harness-modes.md](references/harness-modes.md) | sequential roles |
 | Releasing | [references/release-channels.md](references/release-channels.md) | `release --channel <name>` |
 | More than one person or machine | [references/collaboration.md](references/collaboration.md) | set `lite-dev.owner`, then `new` |
+| One root, several repositories | [references/workspace.md](references/workspace.md) | `status` (repos), `gate --repo` |
 | Others bypassed the flow | [references/reconcile.md](references/reconcile.md) | `reconcile` |
 | Docs drifting (links, indexes, pins) | [references/docs-hygiene.md](references/docs-hygiene.md) | `check` |
 | Retiring a finished item | — | `archive <ID>` |
@@ -92,7 +93,7 @@ python3 <skill>/scripts/flow.py status --stale [--days N]
 python3 <skill>/scripts/flow.py check [--work <ID>]
 python3 <skill>/scripts/flow.py design <ID>
 python3 <skill>/scripts/flow.py design-ready <ID>
-python3 <skill>/scripts/flow.py gate --level l3 --work <ID>
+python3 <skill>/scripts/flow.py gate --level l3 --work <ID> [--repo <path>]
 python3 <skill>/scripts/flow.py claim <ID> [--takeover --reason "..."]
 python3 <skill>/scripts/flow.py done <ID> [--owner "Name"]
 python3 <skill>/scripts/flow.py drop <ID> [--reason "..."]
@@ -123,7 +124,9 @@ python3 <skill>/scripts/flow.py extensions
 - `design-ready` refuses an incomplete, unconfirmed, wrong-item, out-of-order,
   or cyclic design and writes `status: ready`.
 - `gate` validates the item under `--work` (or the whole project), then runs the
-  profile's commands for a level.
+  profile's commands for a level. In a workspace it runs only the commands of the
+  repositories the change touches, and says which ones it skipped or could not
+  inspect; `--repo` overrides the scope.
 - `claim` reassigns the owner; commit it so teammates see the change. Another
   person's open item needs `--takeover --reason "..."`; a closed or archived
   item cannot be claimed.
@@ -230,6 +233,10 @@ gate.
   invalidates the cheap level: the gate says to run the strictest one.
 - The strictest level's last PASS is remembered per clone. `status` and a cheaper
   gate tell you when it is stale; this is advisory, never a block.
+- A workspace scopes the gate to the repositories the change touches (commits,
+  then the worktree, then the design's Repo column, then everything with a
+  warning). A repository that is declared but not checked out is named, never
+  silently skipped.
 - `[design] risk_paths` makes a change structural: without a ready design the gate
   warns, or blocks when `risk_gate = "block"`. `risk_exempt` is what keeps a
   documentation change about those paths from tripping the rule.
@@ -287,6 +294,7 @@ per AC, without a recorded full-level gate PASS, or without an identity.
 - [Roles](references/roles.md)
 - [Harness modes](references/harness-modes.md)
 - [Teams and machines](references/collaboration.md)
+- [Workspaces](references/workspace.md)
 - [Release channels](references/release-channels.md)
 - [Reconcile](references/reconcile.md)
 - [Docs hygiene](references/docs-hygiene.md)

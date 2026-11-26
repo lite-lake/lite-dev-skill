@@ -1,5 +1,6 @@
 ---
 channel: <CHANNEL>
+repo: <REPO>
 date: <DATE>
 source: <SHA>
 previous: <PREVIOUS>

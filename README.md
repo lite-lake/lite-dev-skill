@@ -9,7 +9,7 @@ completion without inventing process.
 
 Repository: <https://github.com/lite-lake/lite-dev-skill>
 
-- Single repository first. No workspace, no service mesh, no assumptions about your CI.
+- Single repository by default; a workspace of several repositories is one table away.
 - Zero install: Python 3.11+ standard library only (`tomllib`). No dependencies.
 - The agent is the runtime. The skill is the entry point; scripts and references
   load on demand.
@@ -44,7 +44,8 @@ Three things make it different from a checklist:
 - Not a task tracker, a spec generator, or a project management tool.
 - Not a replacement for your tests. It decides *when* they run and *what counts
   as evidence*.
-- Not a multi-repo orchestrator. Single repository only.
+- Not a build orchestrator. It runs the commands you configure, scoped to the
+  repositories a change touches; it does not fetch, build images, or deploy.
 
 ## Quick start
 
@@ -121,6 +122,7 @@ skills/lite-dev/            the installable skill: everything is inside
   SKILL.md                  entry point: principles, routing, stop conditions, red lines
   profile.template.toml     copy to docs/flow/profile.toml
   references/               invariants + depth, loaded per situation
+                            (workspace.md covers one root, several repositories)
   templates/                item, design, test report, implementation, release, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
   scripts/flow.py           init / new / claim / whoami / status / check / design /
@@ -131,6 +133,7 @@ skills/lite-dev/            the installable skill: everything is inside
                             scaffolding, atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
 examples/minimal/           a working single-repo project
+examples/workspace/         a working workspace: one root, two repositories
 ```
 
 ## What is deterministic, what is not
@@ -193,6 +196,47 @@ Bundled: `go-service` (build/vet/test and Go risk paths; build output goes to a
 temp directory), `security-scan` (fails on credentials in the index or untracked
 non-ignored files), `deploy-lane` (validates deployment manifests).
 
+## One root, several repositories
+
+A workspace is a directory that holds several clones and is not itself one. It
+declares three things and everything else follows:
+
+```toml
+[project]
+root = "."                  # explicit; discovery would stop at docs/ (its own clone)
+docs_dir = "docs"
+work_dir = "docs/work"
+
+[workspace]
+control = "docs"            # items, release records, and the gate ledger live here
+
+[[workspace.repo]]
+path = "svc-a"
+mainline = "main"
+
+[commands]
+svc_a_test = { dir = "svc-a", run = "go test ./..." }
+```
+
+- **The gate runs where the change is.** A command with `dir` belongs to a
+  repository; the gate scopes to the repositories the change touches (commits,
+  then the worktree, then the design's Repo column) and names what it skipped or
+  could not inspect. `gate --repo svc-a` overrides the scope. This is what keeps
+  `l1` cheap without weakening it.
+- **Change detection spans repositories.** Every path is prefixed with its
+  repository, so `[design] risk_paths = ["svc-a/migrations/"]` is one list for
+  the whole workspace.
+- **Releases are per repository.** `[[release.channel]]` binds a channel to one
+  repository, the record carries `repo:`, and the chain is ordered by that
+  repository's history — the old rule, applied to the right graph.
+- **Documents get a record-store list.** `[docs] stores` names requirement and
+  asset trees so they are not asked for an index; a cross-repository link inside
+  the root is fine, an absolute path or a link that leaves the root is a warning
+  with a bounded exemption.
+
+Omit `[workspace]` and you get exactly the single-repository behaviour of 0.3.x.
+Details: [references/workspace.md](skills/lite-dev/references/workspace.md).
+
 ## Teams and multiple machines
 
 The flow is files plus git; there is no server, no lock service, and no network
@@ -242,8 +286,9 @@ gate PASS, and an identity), ordered batch graphs, the risk-path design gate ove
 the whole history with worktree/committed provenance, the strictest-level
 announcement `done`/`status`/`init` print, the
 per-clone gate ledger, release bookkeeping/debt separation, three bundled
-extensions, and a runnable single-repo example. Planned: a multi-repo workspace
-profile.
+extensions, per-repository commands and gate scoping, per-repository release
+channels, configurable document stores, and two runnable examples (single
+repository and workspace).
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

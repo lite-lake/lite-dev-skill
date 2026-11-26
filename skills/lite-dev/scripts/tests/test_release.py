@@ -26,7 +26,7 @@ name = "release-project"
 language = "en"
 
 [flow]
-requires = ">=0.3.2,<0.4"
+requires = ">=0.4.0,<0.5"
 
 [id]
 format = "{date}-{type}-{time}"

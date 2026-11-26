@@ -2,6 +2,71 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.4.0 — 2026-11-27
+
+One project root can now hold several git repositories. A workspace declares its
+root, the repository that carries the flow's own records, and the repositories it
+may change; the gate, the change set, the release chain, and the document rules
+all follow. A single-repository profile is unchanged and needs no edit.
+
+### Added
+
+- `[project] root` — set the project root explicitly. Discovery now walks up to
+  the nearest repository, which stops at the wrong one when `docs/` is itself a
+  clone; `root` is relative to the directory that holds `docs/`.
+- `[workspace] control` and `[[workspace.repo]]` — the control repository carries
+  work items, release records, and the gate ledger; each declared repository has
+  its own mainline. `work_dir` and `release_dir` must live inside the control
+  repository, and nested repositories are refused.
+- Per-repository commands: a `[commands]` value may be a table
+  (`svc_a_test = { dir = "svc-a", run = "go test ./..." }`). The gate runs a
+  step only when its repository is in scope; a step without `dir` always runs.
+- `gate --repo <path>` (repeatable, `.` is the control repository) overrides the
+  scope. `status` prints one line per repository with branch, HEAD, distance from
+  the last fetch, and dirty count; `status --json` carries `repos`.
+- Change detection visits every declared repository and prefixes each path with
+  it, so one risk list covers the workspace. A repository that is missing or
+  unreadable is reported instead of being read as an empty change.
+- `[[release.channel]]` binds a channel to a repository; records carry `repo:`,
+  and the chain is ordered by that repository's history. A record without the
+  field is read as the control repository.
+- `[docs] stores` names record and asset directories (globs allowed) that are not
+  document trees; `[docs] surfaces` adds document roots beyond `docs_dir`.
+- Two new document checks: an absolute link target (`absolute`) and a target that
+  leaves the project root (`escape`). Both are warnings with bounded exemptions,
+  not switches. A link into a declared repository is normal.
+- `[project] owner_file` — a per-machine identity file for a root that is not a
+  repository. `git config lite-dev.owner` is read in the control repository first,
+  then the root.
+- `item.md` gained optional `prd:` and `board:` pointers; `check` reports a
+  pointer that does not resolve, and `handoff` prints them.
+- `examples/workspace` — a runnable two-repository workspace with an acceptance
+  test that runs the whole flow, including a scoped gate and a recorded release.
+
+### Changed
+
+- Root discovery prefers `[project] root`, then the nearest repository, then the
+  conventional `docs/flow` location. `init` reuses an existing profile's root
+  instead of scaffolding a second flow inside a subdirectory.
+- `init` writes through a symlinked entry document instead of replacing the link,
+  refuses a target outside the project root, and says when a written file is not
+  inside any git work tree.
+- A path prefix matches a directory: `svc-a` no longer covers `svc-a-tools/`.
+- `commands.execute` returns the plan it used, and the gate reports what it
+  skipped and what it could not inspect. A missing repository no longer crashes
+  the gate and is never silently skipped.
+- `changed_paths` no longer swallows a git error: the degradation is reported.
+- `profile.template.toml` requires `>=0.4.0,<0.5`; the bundled extensions require
+  the same range.
+
+### Breaking changes
+
+- A profile that declares `[workspace]` will not load on 0.3.x (unknown key).
+  Downgrading means reverting the profile too. Profiles without the new tables
+  load and behave exactly as before; `examples/minimal` is the guard for that.
+- `[release] mainline` is still required when channels are configured, and is the
+  default for each `[[release.channel]]`.
+
 ## 0.3.9 — 2026-11-27
 
 Risk and fallback paths are now judged over the whole history instead of a

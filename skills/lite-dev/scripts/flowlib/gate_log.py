@@ -20,7 +20,7 @@ FILE_PREFIX = "gate-log"
 def path_for(profile: Profile) -> Path | None:
     """One ledger per profile, so two projects in one repository do not mix."""
     try:
-        directory = git.git_dir(profile.root)
+        directory = git.git_dir(profile.control_root)
     except git.GitError:
         return None
     if directory is None:
@@ -29,7 +29,13 @@ def path_for(profile: Profile) -> Path | None:
     return directory / "lite-dev" / f"{FILE_PREFIX}-{digest}.jsonl"
 
 
-def record(profile: Profile, level: str, ok: bool, item: str = "") -> None:
+def record(
+    profile: Profile,
+    level: str,
+    ok: bool,
+    item: str = "",
+    repos: list[str] | None = None,
+) -> None:
     path = path_for(profile)
     if path is None:
         return
@@ -41,6 +47,8 @@ def record(profile: Profile, level: str, ok: bool, item: str = "") -> None:
             "ok": bool(ok),
             "item": item,
         }
+        if repos:
+            entry["repos"] = list(repos)
         with open(path, "a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:

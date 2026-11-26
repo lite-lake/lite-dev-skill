@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import fsio, git
 from . import profile as profile_mod
+from .errors import FlowError
 from .profile import Profile, ProfileError
 
 AGENTS_BEGIN = "<!-- lite-dev:begin -->"
@@ -251,8 +252,40 @@ def stub_text(path: Path) -> str:
 
 
 def _write(path: Path, text: str, result: Scaffold) -> None:
-    fsio.atomic_write_text(path, text)
-    result.wrote.append(relative(result.root, path))
+    """Write to the file a reader actually reads, and say where that was.
+
+    A workspace keeps one authoritative document and symlinks it from every
+    place that needs it. Replacing the link would detach the copy; writing
+    through it updates the authority. The other two notes are the two ways a
+    write can look successful and still be invisible to teammates: a target
+    outside the project, and a target no repository tracks.
+    """
+    target = fsio.write_target(path)
+    root = result.root.resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise FlowError(
+            f"{relative(result.root, path)} is a symlink to {target}, which is outside "
+            "the project root; write it where the file actually lives"
+        )
+    fsio.atomic_write_text(target, text)
+    label = relative(result.root, path)
+    result.wrote.append(label)
+    if target != path:
+        result.notes.append(
+            f"{label}: written through the symlink to {relative(root, target)}"
+        )
+    try:
+        inside = git.repo_of(target) is not None
+    except git.GitError:
+        inside = True
+    if not inside:
+        result.notes.append(
+            f"untracked: {relative(root, target)} is not inside a git work tree; "
+            "commit it from the repository that owns this directory, or a teammate "
+            "will not see it"
+        )
 
 
 def _doc_text(root: Path, profile: Profile, name: str) -> str:
@@ -317,21 +350,29 @@ def apply(
         _write(work_readme, work_readme_text(loaded.language), result)
 
     if baseline:
-        result.notes.append(_baseline_note(root, profile_path))
+        result.notes.append(_baseline_note(root, profile_path, loaded.control_root))
     return result
 
 
-def _baseline_note(root: Path, profile_path: Path) -> str:
-    """Set the baseline only on a clean tree, so it names a commit people meant."""
-    if not git.is_repo(root):
+def _baseline_note(
+    root: Path, profile_path: Path, control_root: Path | None = None
+) -> str:
+    """Set the baseline only on a clean tree, so it names a commit people meant.
+
+    The baseline is a commit in the control repository: that is the history
+    `reconcile` reads when a project has no release record yet.
+    """
+    control = control_root or root
+    if not git.is_repo(control):
         return (
-            "baseline: not set — this is not a git repository; `reconcile` needs "
-            "history. Run `git init`, commit the scaffold, then `flow.py init --baseline`"
+            "baseline: not set — the control directory is not a git repository; "
+            "`reconcile` needs history. Run `git init` there, commit the scaffold, "
+            "then `flow.py init --baseline`"
         )
-    dirty = git.dirty(root)
+    dirty = git.dirty(control)
     if dirty:
         return (
-            "baseline: not set — the working tree has uncommitted paths; commit "
+            "baseline: not set — the control repository has uncommitted paths; commit "
             "them, then run `flow.py init --baseline` so the baseline names a "
             "commit you meant ("
             + ", ".join(dirty[:3])
@@ -339,7 +380,7 @@ def _baseline_note(root: Path, profile_path: Path) -> str:
             + ")"
         )
     try:
-        sha = git.head(root)
+        sha = git.head(control)
     except git.GitError:
         return (
             "baseline: not set — the repository has no commit yet; commit the "

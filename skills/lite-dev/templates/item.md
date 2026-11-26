@@ -9,6 +9,11 @@ owner: <OWNER>
 created: <DATE>
 closed:
 closed_by:
+# Optional pointers. `prd` is the requirement's home when it lives outside the
+# item (a product spec, a ticket); `board` is the task board id. The item owns
+# the implementation record; those own the request and its status elsewhere.
+prd:
+board:
 ---
 
 ## Problem

@@ -28,7 +28,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.3.5,<0.4"
+requires = ">=0.4.0,<0.5"
 
 [id]
 format = "{date}-{type}-{time}"

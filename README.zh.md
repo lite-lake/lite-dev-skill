@@ -8,7 +8,7 @@
 
 仓库：<https://github.com/lite-lake/lite-dev-skill>
 
-- 单仓库优先。不假设 workspace、服务网格，也不假设你的 CI。
+- 默认单仓库；多仓工作空间只差一张表。
 - 零安装：仅用 Python 3.11+ 标准库（`tomllib`），无第三方依赖。
 - Agent 就是运行时。skill 是入口；脚本和参考资料按需加载。
 
@@ -40,7 +40,8 @@
 
 - 不是任务看板、不是 spec 生成器、也不是项目管理工具。
 - 不替代你的测试。它决定测试*何时*跑、*什么算*证据。
-- 不是多仓库编排器。仅支持单仓库。
+- 不是构建编排器。它只运行你配置的命令，并按改动涉及的仓库收窄；它不拉取代码、
+  不构建镜像、不部署。
 
 ## 快速开始
 
@@ -118,6 +119,7 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
                             交接提示词、归档、命令执行、项目脚手架、原子写入与写者锁
   scripts/tests/            单元测试 + 端到端验收
 examples/minimal/           可直接跑的单仓库示例项目
+examples/workspace/         可直接跑的工作空间：一个根，两个仓库
 ```
 
 ## 哪些是确定性的，哪些不是
@@ -175,6 +177,42 @@ flow.py extensions                     # 每个扩展贡献了什么
 `security-scan`（索引里或未跟踪的非忽略文件里有凭据就让门禁失败）、`deploy-lane`
 （校验部署 manifest）。
 
+## 一个根，多个仓库
+
+工作空间是一个容纳多个克隆、自身不是仓库的目录。它只声明三件事，其余随之工作：
+
+```toml
+[project]
+root = "."                  # 显式声明；自动探测会停在 docs/（它自己是一个克隆）
+docs_dir = "docs"
+work_dir = "docs/work"
+
+[workspace]
+control = "docs"            # 工作项、发布记录、门禁账本都在这里
+
+[[workspace.repo]]
+path = "svc-a"
+mainline = "main"
+
+[commands]
+svc_a_test = { dir = "svc-a", run = "go test ./..." }
+```
+
+- **门禁在改动发生的地方运行。** 带 `dir` 的命令属于某个仓库；门禁按改动涉及的
+  仓库收窄（先看提交，再看 worktree，再看设计的 Repo 列），并说明跳过了什么、
+  哪一项没能检查。`gate --repo svc-a` 可直接覆盖作用域。这正是「l1 保持便宜」
+  与「l1 不降低证明力」可以同时成立的原因。
+- **变更检测跨仓库。** 每条路径都带仓库前缀，所以
+  `[design] risk_paths = ["svc-a/migrations/"]` 一份清单就覆盖整个工作空间。
+- **发布按仓库。** `[[release.channel]]` 把频道绑定到一个仓库，记录带 `repo:`，
+  链按该仓库的历史排序——规则没变，只是用在了对的图上。
+- **文档有了记录仓清单。** `[docs] stores` 声明需求与素材目录，它们不再被要求提供
+  索引；根内部的跨仓链接是正常的，绝对路径或越出根的链接是警告，用「有期限的豁免」
+  登记。
+
+不写 `[workspace]`，得到的就是 0.3.x 的单仓行为，一点不差。细节见
+[references/workspace.md](skills/lite-dev/references/workspace.md)。
+
 ## 团队与多台机器
 
 流程只依赖文件和 git：没有服务端、没有锁服务、也不发网络请求。下面这些规则让它同时
@@ -212,7 +250,8 @@ flow.py extensions                     # 每个扩展贡献了什么
 有序批次图、按整段历史判定并标注 worktree/已提交来源的风险路径设计门、
 `done`/`status`/`init` 打印的最严级别提示、按克隆记录的门禁账本、
 发布记账与欠账分离、三个随附扩展，
-以及可运行的单仓库示例。计划中：多仓库 workspace profile。
+按仓库区分的命令与门禁收窄、按仓库绑定的发布频道、可配置的文档记录仓，
+以及两个可运行示例（单仓与工作空间）。
 
 版本与破坏性变更见 `CHANGELOG.md`（[中文](CHANGELOG.zh.md)）。
 

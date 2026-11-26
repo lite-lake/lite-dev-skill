@@ -1,0 +1,70 @@
+[project]
+name = "workspace"
+language = "en"
+# The root holds several repositories and is itself not a repository. `root`
+# is relative to the directory that holds docs/.
+root = "."
+docs_dir = "docs"
+work_dir = "docs/work"
+# owners = ["Your Name"]
+# owner_file = ".lite-dev/owner"
+
+[flow]
+requires = ">=0.4.0,<0.5"
+
+[id]
+format = "{date}-{type}-{time}"
+
+[workspace]
+# The repository that carries work items, release records, and the gate ledger.
+control = "docs"
+
+[[workspace.repo]]
+path = "svc-a"
+mainline = "main"
+
+[[workspace.repo]]
+path = "svc-b"
+mainline = "main"
+
+[gate]
+# Steps with a `dir` belong to one repository; the gate runs only the ones the
+# change touches. Steps without a `dir` are workspace-level and always run.
+l1 = ["svc_a_test", "svc_b_test"]
+l2 = ["svc_a_test", "svc_b_test", "docs_check"]
+l3 = ["svc_a_test", "svc_b_test", "docs_check"]
+fallback_paths = []
+
+[design]
+required_for = ["L", "M"]
+require_confirmed = true
+# Structural paths, workspace-relative so one list covers every repository.
+risk_paths = ["svc-a/migrations/", "svc-b/migrations/"]
+risk_exempt = ["docs/"]
+risk_gate = "warn"
+
+[commands]
+svc_a_test = { dir = "svc-a", run = "python3 -m unittest discover -s tests -q" }
+svc_b_test = { dir = "svc-b", run = "python3 -m unittest discover -s tests -q" }
+docs_check = "python3 -c \"print('docs ok')\""
+
+[docs]
+required = ["docs/README.md", "docs/AGENTS.md"]
+check_links = true
+zero_fact = true
+# Record stores: listed by status and the commit graph, not reached by links.
+stores = ["docs/work", "docs/releases", "svc-a/migrations", "svc-b/migrations"]
+
+[release]
+dir = "docs/releases"
+gate_level = "l3"
+mainline = "main"
+channels = []
+
+[[release.channel]]
+name = "svc-a"
+repo = "svc-a"
+mainline = "main"
+
+[reconcile]
+risk_paths = ["svc-a/migrations/"]

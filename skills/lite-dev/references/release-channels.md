@@ -69,6 +69,26 @@ independently cannot disagree about which one is latest.
 
 Do not edit a recorded `source` or `previous`; write a new record instead.
 
+## One channel per repository
+
+A commit belongs to one repository, so in a workspace a channel names its
+repository and the chain is ordered by that repository's history:
+
+```toml
+[[release.channel]]
+name = "svc-a"
+repo = "svc-a"
+mainline = "main"
+```
+
+A name in `channels` keeps its old meaning — the control repository. The record
+gains `repo:`, and a record without that field is read as the control repository,
+so an existing record store needs no migration. `--record` refuses when the
+channel's repository or the control repository is dirty; another repository
+being dirty is a warning, because its uncommitted work is not part of this
+release. A change that ships several repositories writes one record per channel;
+the records are the evidence, an umbrella note is a convenience.
+
 The record is rendered from `templates/release.md`; headings and frontmatter
 keys are a parsing contract. The filename contains the date and the short
 source (`staging-20261031-a1b2c3.md`), so records from different machines do not

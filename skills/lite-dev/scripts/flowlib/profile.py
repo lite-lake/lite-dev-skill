@@ -13,6 +13,7 @@ from datetime import date
 from pathlib import Path
 
 from . import __version__
+from . import git
 
 PROFILE_REL = ("docs", "flow", "profile.toml")
 SKILL_ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +28,47 @@ TIME_LEN = 6
 EXTENSION_KEYS = {"name", "version", "description", "requires", "commands", "gate", "docs", "reconcile"}
 # Checks an exemption may silence. Evidence is deliberately absent: an exemption
 # records drift, it does not waive an invariant.
-EXEMPT_CHECKS = ("links", "index", "artifact", "archive_link", "zero_fact", "heading")
+EXEMPT_CHECKS = (
+    "links",
+    "index",
+    "artifact",
+    "archive_link",
+    "zero_fact",
+    "heading",
+    "absolute",
+    "escape",
+)
+
+
+@dataclass(frozen=True)
+class Repo:
+    """One git work tree inside the project root.
+
+    `path` is workspace-relative (`""` means the root is itself the repository).
+    A workspace declares its repositories; a single-repository project has
+    exactly one, the control repository at `""`.
+    """
+
+    path: str
+    mainline: str
+    control: bool = False
+
+    @property
+    def name(self) -> str:
+        return self.path or "."
+
+
+@dataclass(frozen=True)
+class Channel:
+    """A release channel bound to the repository whose history it records.
+
+    The chain rule is unchanged — one chain, one commit graph — but a
+    workspace has several graphs, so the channel names which one it belongs to.
+    """
+
+    name: str
+    repo: str
+    mainline: str
 
 
 class ProfileError(Exception):
@@ -48,6 +89,14 @@ class Exemption:
 class Profile:
     root: Path
     path: Path
+    control_root: Path
+    control_path: str
+    workspace_repos: list[Repo]
+    channels: list[Channel]
+    owner_file: str
+    command_dirs: dict[str, str]
+    docs_stores: list[str]
+    docs_surfaces: list[str]
     name: str
     language: str
     owners: list[str]
@@ -95,6 +144,66 @@ class Profile:
         return self.root / self.release_dir
 
     @property
+    def workspace(self) -> bool:
+        """True when the root holds more than one repository."""
+        return len(self.workspace_repos) > 1
+
+    def repo_root(self, repo_path: str) -> Path:
+        """The directory of one repository, by workspace-relative path."""
+        return self.root / repo_path if repo_path else self.root
+
+    def to_workspace(self, repo_path: str, path: str) -> str:
+        """A path inside one repository, as the profile names it.
+
+        Every configured path (risk paths, fallback paths, exemptions) is
+        workspace-relative, so reports never mix two namespaces.
+        """
+        clean = path.replace("\\", "/").lstrip("/")
+        return f"{repo_path}/{clean}" if repo_path else clean
+
+    def to_repo(self, path: str) -> tuple[str, str]:
+        """(`repo path`, `path inside it`) for a workspace-relative path."""
+        best = ""
+        for repo in self.workspace_repos:
+            if repo.path and (path == repo.path or path.startswith(repo.path + "/")):
+                if len(repo.path) > len(best):
+                    best = repo.path
+        if not best:
+            return "", path
+        return best, path[len(best) + 1 :]
+
+    def control_relative(self, path: str) -> str:
+        """A workspace path relative to the control repository (for git calls)."""
+        if not self.control_path:
+            return path
+        if path == self.control_path:
+            return ""
+        prefix = self.control_path + "/"
+        return path[len(prefix) :] if path.startswith(prefix) else path
+
+    def channel(self, name: str) -> "Channel | None":
+        for entry in self.channels:
+            if entry.name == name:
+                return entry
+        return None
+
+    def command_repo(self, name: str) -> str | None:
+        """The repository a command runs in, or None when it runs at the root.
+
+        A command with a `dir` is scoped to that repository: the gate only runs
+        it when the repository is in scope. A command without one always runs.
+        """
+        directory = self.command_dirs.get(name, "")
+        if not directory:
+            return None
+        best = ""
+        for repo in self.workspace_repos:
+            if repo.path and (directory == repo.path or directory.startswith(repo.path + "/")):
+                if len(repo.path) > len(best):
+                    best = repo.path
+        return best
+
+    @property
     def full_level(self) -> str | None:
         """The strictest defined level: the one a cheap level cannot replace."""
         for level in ("l3", "l2", "l1"):
@@ -113,6 +222,46 @@ def find_profile(start: Path | None = None) -> Path:
         "no docs/flow/profile.toml found; run `flow.py init` from the project root "
         "to scaffold it, or pass --profile"
     )
+
+
+def conventional_root(profile_path: Path) -> Path:
+    """The directory that holds `docs/`, by convention.
+
+    Used as the base for `[project] root` and as the last fallback when no
+    repository is found: a profile at `<root>/docs/flow/profile.toml` names
+    `<root>`.
+    """
+    if profile_path.parent.name == "flow" and profile_path.parent.parent.name == "docs":
+        return profile_path.parents[2]
+    return profile_path.parent
+
+
+def resolve_root(profile_path: Path, declared: str | None) -> Path:
+    """Where the project root is: declared, then discovered, then conventional.
+
+    Discovery alone is wrong for a workspace whose `docs/` is itself a
+    repository — it would stop at `docs/` and file every item under
+    `docs/docs/`. `[project] root` therefore wins when it is set, and it is
+    relative to the conventional root so `.` keeps the obvious meaning.
+    """
+    if declared is not None and declared.strip():
+        if Path(declared).is_absolute():
+            raise ProfileError(
+                "[project] root must be relative to the directory that holds docs/, "
+                f"not an absolute path ({declared!r})"
+            )
+        base = conventional_root(profile_path)
+        root = (base / declared).resolve()
+        if not root.is_dir():
+            raise ProfileError(
+                f"[project] root {declared!r} resolves to {root}, which is not a directory; "
+                f"it is relative to {base}"
+            )
+        return root
+    for parent in profile_path.parents:
+        if (parent / ".git").exists():
+            return parent
+    return conventional_root(profile_path)
 
 
 def _require(table: dict, key: str, where: str, kind: type = str):
@@ -264,6 +413,172 @@ def _id_pattern(id_format: str) -> re.Pattern:
         else:
             parts.append(re.escape(token))
     return re.compile(r"(?<![A-Za-z0-9])" + "".join(parts) + r"(?![A-Za-z0-9])")
+
+
+def _parse_commands(table: dict, where: str) -> tuple[dict[str, str], dict[str, str]]:
+    """A command is a string (runs at the root) or a table (runs in a `dir`).
+
+    The string form is what every existing profile uses. The table form adds the
+    repository dimension a workspace needs without a second profile: `dir` names
+    the working directory, and the gate scopes the command to that repository.
+    """
+    if not isinstance(table, dict):
+        raise ProfileError(f"{where} must be a table")
+    runs: dict[str, str] = {}
+    dirs: dict[str, str] = {}
+    for name, value in table.items():
+        if isinstance(value, str):
+            runs[name] = value
+            continue
+        if not isinstance(value, dict):
+            raise ProfileError(
+                f"{where} {name} must be a command string or a table with 'run' "
+                "and an optional 'dir'"
+            )
+        _allow_keys(value, ("dir", "run"), f"{where} {name}")
+        run = value.get("run")
+        if not isinstance(run, str) or not run.strip():
+            raise ProfileError(
+                f"{where} {name}: 'run' is required and must be a non-empty string"
+            )
+        directory = value.get("dir", "")
+        if not isinstance(directory, str) or Path(directory).is_absolute():
+            raise ProfileError(f"{where} {name}: 'dir' must be relative to the project root")
+        directory = directory.strip().strip("/")
+        runs[name] = run
+        if directory and directory != ".":
+            dirs[name] = directory
+    return runs, dirs
+
+
+def _relative_dir(value, where: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ProfileError(f"{where} must be a non-empty relative path")
+    if Path(value).is_absolute():
+        raise ProfileError(f"{where} must be relative to the project root")
+    return value.strip().strip("/")
+
+
+def _is_repo(path: Path) -> bool:
+    try:
+        return git.is_repo(path)
+    except git.GitError:
+        return False
+
+
+def _parse_workspace(
+    table: dict, root: Path, mainline: str, declared: bool = True
+) -> tuple[str, list[Repo]]:
+    """The control repository and every declared repository.
+
+    Without a `[workspace]` table the project is the single repository at the
+    root — exactly the pre-workspace model. Declaring the table opts into the
+    stricter checks: a control repository must exist, because work items live in
+    one commit graph.
+    """
+    if not declared:
+        return "", [Repo(path="", mainline=mainline, control=True)]
+
+    control = table.get("control", "")
+    if control and (not isinstance(control, str) or Path(control).is_absolute()):
+        raise ProfileError('[workspace] control must be a relative path, e.g. "docs"')
+    control = control.strip().strip("/") if isinstance(control, str) else ""
+    control_root = root / control if control else root
+    if not control:
+        if not _is_repo(root):
+            raise ProfileError(
+                "root is not a git repository and [workspace] control is unset; set "
+                'control = "<repo>" — the repository that carries work items, release '
+                "records, and the gate ledger — or run the flow inside a repository"
+            )
+    else:
+        if not control_root.is_dir():
+            raise ProfileError(
+                f"[workspace] control {control!r} does not exist under {root}"
+            )
+        if not _is_repo(control_root):
+            raise ProfileError(
+                f"[workspace] control {control!r} is not a git work tree; run "
+                "git init there or point control at a repository"
+            )
+
+    entries = table.get("repo", [])
+    if not isinstance(entries, list):
+        raise ProfileError("[[workspace.repo]] must be an array of tables")
+    repos = [Repo(path=control, mainline=mainline, control=True)]
+    seen = {control}
+    for index, entry in enumerate(entries, 1):
+        where = f"[[workspace.repo]] #{index}"
+        if not isinstance(entry, dict):
+            raise ProfileError(f"{where} must be a table")
+        _allow_keys(entry, ("path", "mainline"), where)
+        path = _relative_dir(entry.get("path"), f"{where} path")
+        if path in seen:
+            raise ProfileError(f"{where}: duplicate repository {path!r}")
+        for existing in seen:
+            if existing and (
+                path.startswith(existing + "/") or existing.startswith(path + "/")
+            ):
+                raise ProfileError(
+                    f"{where}: {path!r} overlaps {existing!r}; changes would be counted "
+                    "twice — list only the outermost repository"
+                )
+        repo_mainline = entry.get("mainline", mainline)
+        if not isinstance(repo_mainline, str) or not repo_mainline.strip():
+            raise ProfileError(f"{where}: mainline must be a branch name")
+        seen.add(path)
+        repos.append(Repo(path=path, mainline=repo_mainline.strip(), control=False))
+    return control, repos
+
+
+def _parse_channels(
+    release: dict, control_path: str, mainline: str
+) -> list[Channel]:
+    """Channels, each bound to one repository's commit graph.
+
+    `channels = ["staging"]` keeps its old meaning: the control repository.
+    `[[release.channel]]` names a repository explicitly, which is what a
+    workspace needs — one chain per repository, still one graph per chain.
+    """
+    channels: list[Channel] = []
+    names: set[str] = set()
+    for name in _string_list(release.get("channels", []), "[release] channels"):
+        name = name.strip()
+        if not name:
+            continue
+        if name in names:
+            raise ProfileError(f"[release] channels: duplicate channel {name!r}")
+        names.add(name)
+        channels.append(Channel(name=name, repo=control_path, mainline=mainline))
+
+    entries = release.get("channel", [])
+    if not isinstance(entries, list):
+        raise ProfileError("[[release.channel]] must be an array of tables")
+    for index, entry in enumerate(entries, 1):
+        where = f"[[release.channel]] #{index}"
+        if not isinstance(entry, dict):
+            raise ProfileError(f"{where} must be a table")
+        _allow_keys(entry, ("name", "repo", "mainline"), where)
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ProfileError(f"{where}: 'name' is required")
+        name = name.strip()
+        if name in names:
+            raise ProfileError(f"{where}: duplicate channel {name!r}")
+        repo = entry.get("repo", control_path)
+        if not isinstance(repo, str) or Path(repo).is_absolute():
+            raise ProfileError(f"{where}: 'repo' must be relative to the project root")
+        repo = repo.strip().strip("/")
+        chan_mainline = entry.get("mainline", mainline)
+        if not isinstance(chan_mainline, str) or not chan_mainline.strip():
+            raise ProfileError(
+                f"{where}: 'mainline' is required when [release] mainline is empty"
+            )
+        names.add(name)
+        channels.append(
+            Channel(name=name, repo=repo, mainline=chan_mainline.strip())
+        )
+    return channels
 
 
 def _merge_extension(
@@ -428,7 +743,7 @@ def load(path: Path | str | None = None) -> Profile:
 
     project = raw["project"]
     id_table = raw["id"]
-    commands = dict(raw["commands"])
+    commands, command_dirs = _parse_commands(raw["commands"], "[commands]")
     gate_table = raw["gate"]
     # Validate the raw table first: filtering before validation used to drop a
     # typo like `l4 = [...]` silently, leaving a gate level that looked defined.
@@ -446,10 +761,14 @@ def load(path: Path | str | None = None) -> Profile:
     release = raw.get("release") or {}
     reconcile = raw.get("reconcile") or {}
     extensions = raw.get("extensions") or {}
+    workspace = raw.get("workspace") or {}
+    workspace_declared = raw.get("workspace") is not None
     flow_table = raw.get("flow") or {}
 
     _allow_keys(
-        project, ("name", "language", "owners", "docs_dir", "work_dir"), "[project]"
+        project,
+        ("name", "language", "owners", "docs_dir", "work_dir", "root", "owner_file"),
+        "[project]",
     )
     _allow_keys(id_table, ("format",), "[id]")
     _allow_keys(
@@ -457,11 +776,16 @@ def load(path: Path | str | None = None) -> Profile:
         ("required_for", "require_confirmed", "risk_paths", "risk_exempt", "risk_gate"),
         "[design]",
     )
-    _allow_keys(docs, ("required", "check_links", "zero_fact", "decisions"), "[docs]")
+    _allow_keys(
+        docs,
+        ("required", "check_links", "zero_fact", "decisions", "stores", "surfaces"),
+        "[docs]",
+    )
     _allow_keys(
         release,
         (
             "channels",
+            "channel",
             "dir",
             "gate_level",
             "mainline",
@@ -472,6 +796,7 @@ def load(path: Path | str | None = None) -> Profile:
     )
     _allow_keys(reconcile, ("risk_paths", "baseline"), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
+    _allow_keys(workspace, ("control", "repo"), "[workspace]")
     _allow_keys(flow_table, ("requires",), "[flow]")
     _allow_keys(gate, (*LEVELS, "fallback_paths", "fresh_days"), "[gate]")
 
@@ -530,7 +855,7 @@ def load(path: Path | str | None = None) -> Profile:
     if not isinstance(gate_fresh_days, int) or isinstance(gate_fresh_days, bool) or gate_fresh_days < 0:
         raise ProfileError("[gate] fresh_days must be a non-negative integer")
 
-    release_channels = _string_list(
+    declared_channels = _string_list(
         release.get("channels", []), "[release] channels"
     )
     release_dir = release.get("dir", "docs/releases")
@@ -545,7 +870,7 @@ def load(path: Path | str | None = None) -> Profile:
     if not isinstance(release_mainline, str):
         raise ProfileError("[release] mainline must be a branch name")
     release_mainline = release_mainline.strip()
-    if release_channels and not release_mainline:
+    if (declared_channels or release.get("channel")) and not release_mainline:
         raise ProfileError(
             '[release] mainline is required when channels are configured, e.g. mainline = "main"'
         )
@@ -581,19 +906,67 @@ def load(path: Path | str | None = None) -> Profile:
         raise ProfileError("[reconcile] baseline must be a commit id or ref")
     reconcile_baseline = reconcile_baseline.strip()
 
-    # Normally <root>/docs/flow/profile.toml. Prefer the repository root when
-    # there is a .git; otherwise honor the conventional three-level path and
-    # fall back to the profile's own directory for a custom --profile file.
-    root = None
-    for parent in profile_path.parents:
-        if (parent / ".git").exists():
-            root = parent
-            break
-    if root is None:
-        if profile_path.parent.name == "flow" and profile_path.parent.parent.name == "docs":
-            root = profile_path.parents[2]
-        else:
-            root = profile_path.parent
+    declared_root = project.get("root")
+    if declared_root is not None and not isinstance(declared_root, str):
+        raise ProfileError("[project] root must be a relative path")
+    root = resolve_root(profile_path, declared_root)
+
+    owner_file = project.get("owner_file", "")
+    if not isinstance(owner_file, str) or Path(owner_file).is_absolute():
+        raise ProfileError(
+            '[project] owner_file must be relative to the project root, e.g. ".lite-dev/owner"'
+        )
+    owner_file = owner_file.strip()
+
+    docs_stores = _string_list(docs.get("stores", []), "[docs] stores")
+    for store in docs_stores:
+        if Path(store).is_absolute():
+            raise ProfileError(
+                f"[docs] stores: {store!r} must be relative to the project root"
+            )
+    docs_surfaces = _string_list(docs.get("surfaces", []), "[docs] surfaces")
+    for surface in docs_surfaces:
+        if Path(surface).is_absolute() or not surface.strip():
+            raise ProfileError(
+                f"[docs] surfaces: {surface!r} must be a non-empty relative path"
+            )
+
+    control_path, workspace_repos = _parse_workspace(
+        workspace, root, release_mainline, workspace_declared
+    )
+    control_root = root / control_path if control_path else root
+    if control_path:
+        for label, value in (("work_dir", work_dir), ("release_dir", release_dir)):
+            if value != control_path and not value.startswith(control_path + "/"):
+                raise ProfileError(
+                    f"[{label}] {value!r} is outside [workspace] control {control_path!r}; "
+                    "items and release records need one commit graph — move it under "
+                    f"{control_path}/ or change control"
+                )
+    repo_paths = {repo.path for repo in workspace_repos}
+    single = len(workspace_repos) == 1 and workspace_repos[0].path == ""
+    for command_name, directory in command_dirs.items():
+        if single:
+            continue
+        if not any(
+            directory == repo.path or directory.startswith(repo.path + "/")
+            for repo in workspace_repos
+            if repo.path
+        ):
+            raise ProfileError(
+                f"[commands] {command_name}: dir {directory!r} is not inside a declared "
+                "repository; add [[workspace.repo]] for it or drop dir"
+            )
+
+    channels = _parse_channels(release, control_path, release_mainline)
+    for entry in channels:
+        if entry.repo not in repo_paths:
+            raise ProfileError(
+                f"release channel {entry.name!r} points at repo {entry.repo!r}, which is "
+                "not in [[workspace.repo]]; declare it or fix the channel"
+            )
+    release_channels = [entry.name for entry in channels]
+
     extensions_enabled, extensions_dir, extension_info = _apply_extensions(
         root, extensions, commands, gate, required_docs, risk_paths
     )
@@ -631,6 +1004,14 @@ def load(path: Path | str | None = None) -> Profile:
     return Profile(
         root=root,
         path=profile_path,
+        control_root=control_root,
+        control_path=control_path,
+        workspace_repos=list(workspace_repos),
+        channels=list(channels),
+        owner_file=owner_file,
+        command_dirs=dict(command_dirs),
+        docs_stores=list(docs_stores),
+        docs_surfaces=list(docs_surfaces),
         name=name,
         language=language,
         owners=owners,

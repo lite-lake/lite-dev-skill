@@ -6,6 +6,8 @@ facts. `check` mechanises the part of it that can be decided from the files:
 | Rule | Severity | What it means |
 |---|---|---|
 | relative links resolve | error | a link to a deleted or renamed file |
+| no link target is an absolute path | warning | a path that resolves on one machine only |
+| no link leaves the project root | warning | a target outside every declared repository |
 | every directory index is reachable from `docs_dir/README.md` | warning | an index nobody can find |
 | a directory of documents has a `README.md` | warning | no entry point for the subtree |
 | every file is linked from its directory's `README.md` | warning | a file nobody can reach |
@@ -46,8 +48,10 @@ that holds markdown needs one. The per-directory rule only covered directories
 that already had a README, which left a whole unreferenced subtree invisible.
 
 Record stores are excluded: item directories under `work_dir` are listed by
-`status`, release records are ordered by the commit graph. Demanding index links
-for them would be noise, not reachability. This applies even if you add a
+`status`, release records are ordered by the commit graph. `[docs] stores` names
+the project's own record and asset directories (globs allowed), so a requirement
+tree or an asset library does not have to grow a README per folder. Demanding
+index links for them would be noise, not reachability. This applies even if you add a
 `docs/releases/README.md`: its records are not required to be linked from it.
 The archive index is the exception: it is the entry point for archived items, so
 `check` warns when an archived item has no row or a row has no item.
@@ -64,7 +68,8 @@ of them.
 
 ```toml
 [[exempt]]
-check = "links"            # links | index | artifact | archive_link | zero_fact | heading
+check = "links"            # links | index | artifact | archive_link | zero_fact |
+                           # heading | absolute | escape
 path = "docs/legacy"       # path prefix, relative to the project root
 reason = "imported handbook, not maintained here"
 until = "2027-03-31"

@@ -46,6 +46,18 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
+def write_target(path: Path) -> Path:
+    """Where a write must land: the link target when `path` is a symlink.
+
+    `os.replace` swaps the link itself, which silently detaches a workspace that
+    keeps one authoritative file and symlinks it from elsewhere. Following the
+    link writes the file the reader actually reads.
+    """
+    if path.is_symlink():
+        return path.resolve()
+    return path
+
+
 def lock_path(root: Path) -> Path:
     digest = hashlib.sha1(str(root.resolve()).encode("utf-8")).hexdigest()[:16]
     return Path(tempfile.gettempdir()) / f"lite-dev-{digest}.lock"

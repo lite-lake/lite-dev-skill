@@ -167,7 +167,7 @@ def cmd_new(args) -> int:
     if mode not in MODES:
         raise FlowError("--mode must be one-shot or two-phase")
 
-    owner = identity.resolve(profile.root, args.owner)
+    owner = identity.resolve_for(profile, args.owner)
     moment = stamp.now()
     created = moment.date().isoformat()
     bucket = profile.work_path / artifacts.month_of(created)
@@ -216,21 +216,73 @@ def cmd_new(args) -> int:
     return 0
 
 
-def _checkout(profile: profile_mod.Profile) -> dict | None:
-    """What this checkout knows: branch, HEAD, and distance from its last fetch."""
+def _repo_state(profile: profile_mod.Profile, repo) -> dict:
+    """One repository as a line of fact: branch, HEAD, distance from last fetch."""
+    root = profile.repo_root(repo.path)
+    state = {
+        "path": repo.name,
+        "present": False,
+        "branch": "",
+        "head": "",
+        "ahead": 0,
+        "behind": 0,
+        "upstream": False,
+        "dirty": 0,
+    }
     try:
-        if not git.is_repo(profile.root):
-            return None
-        counts = git.upstream_counts(profile.root)
-        return {
-            "branch": git.branch(profile.root),
-            "head": git.head(profile.root)[:7],
-            "ahead": counts[0] if counts else 0,
-            "behind": counts[1] if counts else 0,
-            "upstream": counts is not None,
-        }
+        if not git.is_repo(root):
+            return state
+        counts = git.upstream_counts(root)
+        state.update(
+            {
+                "present": True,
+                "branch": git.branch(root),
+                "head": git.head(root)[:7],
+                "ahead": counts[0] if counts else 0,
+                "behind": counts[1] if counts else 0,
+                "upstream": counts is not None,
+                "dirty": len(git.dirty(root)),
+            }
+        )
     except git.GitError:
+        return state
+    return state
+
+
+def _repos(profile: profile_mod.Profile) -> list[dict]:
+    return [_repo_state(profile, repo) for repo in profile.workspace_repos]
+
+
+def _repo_line(states: list[dict]) -> str:
+    parts = []
+    for state in states:
+        if not state["present"]:
+            parts.append(f"{state['path']} (not checked out)")
+            continue
+        tail = []
+        if state["behind"]:
+            tail.append(f"behind {state['behind']}")
+        if state["dirty"]:
+            tail.append(f"+{state['dirty']} dirty")
+        suffix = f" ({', '.join(tail)})" if tail else ""
+        parts.append(
+            f"{state['path']} {state['branch'] or 'detached'} {state['head']}{suffix}"
+        )
+    return " | ".join(parts)
+
+
+def _checkout(profile: profile_mod.Profile) -> dict | None:
+    """The single repository's checkout state, for a project that has one."""
+    state = _repo_state(profile, profile.workspace_repos[0])
+    if not state["present"]:
         return None
+    return {
+        "branch": state["branch"],
+        "head": state["head"],
+        "ahead": state["ahead"],
+        "behind": state["behind"],
+        "upstream": state["upstream"],
+    }
 
 
 def _stale_rows(
@@ -240,16 +292,19 @@ def _stale_rows(
 
     The date is the latest commit that touched anything in the item directory;
     an uncommitted item falls back to its `created` date. This is a report, not
-    a state: nothing is written and nothing is blocked.
+    a state: nothing is written and nothing is blocked. Items live in the
+    control repository, so that is the history this reads.
     """
     today = date.today()
     dates: dict[str, str] = {}
     note = ""
     try:
-        if git.is_repo(profile.root):
-            dates = git.activity_dates(profile.root, profile.work_dir)
+        if git.is_repo(profile.control_root):
+            dates = git.activity_dates(
+                profile.control_root, profile.control_relative(profile.work_dir)
+            )
         else:
-            note = "not a git repository; using created dates"
+            note = "the control directory is not a git repository; using created dates"
     except git.GitError:
         note = "git is unavailable; using created dates"
 
@@ -311,7 +366,7 @@ def cmd_status(args) -> int:
     items = artifacts.all_items(profile)
     mine = ""
     if args.mine:
-        mine = identity.resolve(profile.root, None)
+        mine = identity.resolve_for(profile, None)
         items = [
             item for item in items if identity.same(item.meta.get("owner") or "", mine)
         ]
@@ -320,6 +375,7 @@ def cmd_status(args) -> int:
     for item in items:
         counts[item.status] = counts.get(item.status, 0) + 1
     checkout = _checkout(profile)
+    repo_states = _repos(profile) if profile.workspace else []
     items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
     full = profile.full_level
     # A fresh clone has no PASS yet; that is expected until an item is ready to
@@ -340,6 +396,12 @@ def cmd_status(args) -> int:
             "version": __version__,
             "profile": str(profile.path.relative_to(profile.root)),
             "checkout": checkout,
+            "repos": [
+                {**state, "control": repo.control}
+                for state, repo in zip(repo_states, profile.workspace_repos)
+            ]
+            if profile.workspace
+            else None,
             "mine": mine or None,
             "gate": {"full": full, "stale": stale},
             "items": [
@@ -352,6 +414,8 @@ def cmd_status(args) -> int:
                     "status": item.status,
                     "owner": item.meta.get("owner", ""),
                     "closed_by": item.meta.get("closed_by", ""),
+                    "prd": item.meta.get("prd", ""),
+                    "board": item.meta.get("board", ""),
                     "ac_done": item.ac_done,
                     "ac_total": item.ac_total,
                     "design": (
@@ -384,7 +448,18 @@ def cmd_status(args) -> int:
 
     print(f"{profile.name} ({profile.path.relative_to(profile.root)})")
     print(f"  lite-dev {__version__}")
-    if checkout:
+    if profile.workspace:
+        control = profile.control_path or "."
+        print(f"  control {control}")
+        print(f"  repos   {_repo_line(repo_states)}")
+        missing = [state["path"] for state in repo_states if not state["present"]]
+        if missing:
+            print(
+                "  warn:    not checked out here: "
+                + ", ".join(missing)
+                + " (its changes are invisible to the gate on this machine)"
+            )
+    elif checkout:
         label = checkout["branch"] or "detached HEAD"
         if checkout["upstream"]:
             print(
@@ -561,23 +636,24 @@ def cmd_gate(args) -> int:
     profile = _load_profile(args)
     errors, warnings = checks.check_project(profile, work=args.work)
     item = None
-    changed = checks.ChangeSet()
     if args.work:
         item = artifacts.find_item(profile, args.work)
-    try:
-        changed = (
-            checks.changed_paths(profile, item)
-            if item is not None
-            else checks.ChangeSet(worktree=git.worktree_paths(profile.root))
-        )
-    except git.GitError:
-        changed = checks.ChangeSet()
 
+    changed = checks.changed_paths(profile, item)
+    warnings.extend(changed.degraded)
     if item is not None:
         risk_errors, risk_warnings = checks.risk_gate(item, profile, changed)
         errors.extend(risk_errors)
         warnings.extend(risk_warnings)
     warnings.extend(checks.fallback_warnings(profile, args.level, changed))
+
+    chosen = checks.scope(profile, item, args.repo)
+    warnings.extend(chosen.warnings)
+    if profile.workspace:
+        print(
+            f"gate {args.level}: scope {chosen.reason} — "
+            + ", ".join(path or "." for path in chosen.repos)
+        )
 
     if errors:
         print("FAIL: static checks must pass before the gate runs")
@@ -606,6 +682,7 @@ def cmd_gate(args) -> int:
             args.level,
             timeout=args.timeout,
             item=item.id if item is not None else "",
+            repos=chosen.repos,
         )
     except ProfileError as exc:
         print(f"error: {exc}")
@@ -636,7 +713,7 @@ def _mention_evidence(path: Path) -> None:
 def cmd_done(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
-    closer = identity.try_resolve(profile.root, args.owner)
+    closer = identity.try_resolve_for(profile, args.owner)
 
     closed = (item.meta.get("closed") or "").strip()
     if closed:
@@ -744,7 +821,7 @@ def cmd_drop(args) -> int:
         raise FlowError(
             f"{item.id} is already closed ({closed}); use archive if it should leave the working set"
         )
-    closer = identity.resolve(profile.root, args.owner)
+    closer = identity.resolve_for(profile, args.owner)
     reason = " ".join((args.reason or "").split())
     with fsio.project_lock(profile.root):
         current = artifacts.find_item(profile, args.id)
@@ -765,7 +842,7 @@ def cmd_drop(args) -> int:
 def cmd_claim(args) -> int:
     profile = _load_profile(args)
     item = artifacts.find_item(profile, args.id)
-    owner = identity.resolve(profile.root, args.owner)
+    owner = identity.resolve_for(profile, args.owner)
     if artifacts.is_archived(item):
         raise FlowError(
             f"{item.id} is archived; run flow.py unarchive {item.id} before changing its owner"
@@ -796,7 +873,7 @@ def cmd_claim(args) -> int:
         current = artifacts.find_item(profile, args.id)
         updates = {"owner": owner}
         if previous and args.takeover:
-            actor = identity.try_resolve(profile.root, None)
+            actor = identity.try_resolve_for(profile, None)
             updates["takeover_by"] = actor[0] if actor else owner
             updates["takeover_reason"] = reason
         artifacts.set_frontmatter_values(current.path, updates)
@@ -809,7 +886,7 @@ def cmd_claim(args) -> int:
 
 def cmd_whoami(args) -> int:
     profile = _load_profile(args)
-    found = identity.try_resolve(profile.root, args.owner)
+    found = identity.try_resolve_for(profile, args.owner)
     if found is None:
         print("identity: (none)")
         print(
@@ -890,13 +967,16 @@ def cmd_release(args) -> int:
         return 2
 
     channel = args.channel
+    bound = profile.channel(channel)
+    repo_root = profile.repo_root(bound.repo if bound else profile.control_path)
+    channel_mainline = bound.mainline if bound else profile.release_mainline
     try:
-        git.ensure_repo(profile.root)
-        branch = git.branch(profile.root)
-        head = git.head(profile.root)
+        git.ensure_repo(repo_root)
+        branch = git.branch(repo_root)
+        head = git.head(repo_root)
         previous = release.tip(profile, channel)
         if args.since:
-            if not git.is_ancestor(profile.root, args.since, head):
+            if not git.is_ancestor(repo_root, args.since, head):
                 raise FlowError(
                     f"--since {args.since[:7]} is not an ancestor of HEAD; "
                     "fetch/pull or pass a commit from this clone's history"
@@ -904,7 +984,7 @@ def cmd_release(args) -> int:
             if (
                 previous
                 and args.since != previous.source
-                and git.is_ancestor(profile.root, previous.source, args.since)
+                and git.is_ancestor(repo_root, previous.source, args.since)
             ):
                 raise FlowError(
                     f"--since {args.since[:7]} starts after the recorded tip "
@@ -912,16 +992,24 @@ def cmd_release(args) -> int:
                     "or fix the bookkeeping commit first"
                 )
         since = args.since or (previous.source if previous else None)
-        commits = git.commits(profile.root, since)
+        commits = git.commits(repo_root, since)
         debt = reconcile.collect(profile, channel, since)
-        range_paths = git.files_in_range(profile.root, since)
+        range_paths = [
+            profile.to_workspace(bound.repo if bound else profile.control_path, path)
+            for path in git.files_in_range(repo_root, since)
+        ]
         design_risk_touched = checks.risk_paths_touched(profile, range_paths)
         risk_touched = (
             design_risk_touched if profile.release_confirm_risk_paths else []
         )
         reconcile_risk = checks.paths_matching(range_paths, profile.risk_paths)
-        counts = git.upstream_counts(profile.root)
+        counts = git.upstream_counts(repo_root)
         behind = counts[1] if counts else 0
+        control_dirty = (
+            git.dirty(profile.control_root)
+            if profile.control_root != repo_root
+            else debt.dirty
+        )
     except git.GitError as exc:
         print(f"error: {exc}")
         return 2
@@ -973,7 +1061,7 @@ def cmd_release(args) -> int:
         print("\nnext: add --record --rollback \"<target and steps>\" [--note \"...\"]")
         return 0
 
-    by = identity.resolve(profile.root, args.by)
+    by = identity.resolve_for(profile, args.by)
     artifact_list = [item.strip() for item in (args.artifact or []) if item.strip()]
     errors: list[str] = []
     if not args.rollback or not args.rollback.strip():
@@ -984,16 +1072,24 @@ def cmd_release(args) -> int:
             "pull before recording a release"
         )
     if debt.dirty:
-        errors.append("working tree is dirty; commit or stash before recording a release")
+        errors.append(
+            f"the {bound.repo or '.'} repository is dirty; commit or stash before "
+            "recording a release"
+        )
+    if control_dirty and profile.control_root != repo_root:
+        errors.append(
+            f"the control repository ({profile.control_path or '.'}) is dirty; the "
+            "record is written there, so commit or stash before recording"
+        )
     if not branch:
         errors.append("detached HEAD; check out the mainline branch before recording a release")
-    elif branch != profile.release_mainline:
+    elif branch != channel_mainline:
         errors.append(
-            f"current branch '{branch}' is not the mainline '{profile.release_mainline}'; "
-            "record from the mainline"
+            f"current branch '{branch}' is not the mainline '{channel_mainline}' for "
+            f"channel '{channel}'; record from the mainline"
         )
     if previous and head != previous.source and not git.is_ancestor(
-        profile.root, previous.source, head
+        repo_root, previous.source, head
     ):
         errors.append(
             f"this clone is behind the channel: {previous.short} is not an ancestor of HEAD. "
@@ -1033,16 +1129,22 @@ def cmd_release(args) -> int:
         print(f"warn: {warning}")
 
     try:
-        results = commands.execute(
+        results, chosen_steps = commands.execute(
             profile, profile.release_gate_level, timeout=args.timeout
         )
     except ProfileError as exc:
         print(f"error: {exc}")
         return 2
-    if commands.print_results(profile.release_gate_level, results) != 0:
+    if commands.print_results(profile.release_gate_level, results, chosen_steps) != 0:
         print("FAIL: release not recorded")
         return 1
-    gate_log.record(profile, profile.release_gate_level, True, item="release")
+    gate_log.record(
+        profile,
+        profile.release_gate_level,
+        True,
+        item="release",
+        repos=sorted({result.repo for result in results if result.repo}),
+    )
 
     if risk_touched or confirm_text:
         authorization = (
@@ -1056,6 +1158,7 @@ def cmd_release(args) -> int:
 
     record = release.render(
         channel=channel,
+        repo=bound.repo if bound else profile.control_path,
         day=day,
         source=head,
         previous=previous.source if previous else "none",
@@ -1087,11 +1190,31 @@ def cmd_release(args) -> int:
 
 
 def cmd_init(args) -> int:
-    """Scaffold the profile, the entry documents, and the routing block."""
-    root = Path(args.root).resolve() if args.root else Path.cwd()
-    if not root.is_dir():
-        print(f"error: {root} is not a directory", file=sys.stderr)
-        return 2
+    """Scaffold the profile, the entry documents, and the routing block.
+
+    Without `--root`, an existing profile wins over the working directory: a
+    workspace is entered from any of its repositories, and scaffolding a second
+    flow inside a subdirectory would split the item store in two.
+    """
+    if args.root:
+        root = Path(args.root).resolve()
+        if not root.is_dir():
+            print(f"error: {root} is not a directory", file=sys.stderr)
+            return 2
+    else:
+        root = Path.cwd()
+        try:
+            existing = profile_mod.find_profile()
+        except ProfileError:
+            existing = None
+        if existing is not None:
+            try:
+                root = profile_mod.load(existing).root
+            except ProfileError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            print(f"note:    using the existing profile at {existing} (root {root})")
+
     result = scaffold.apply(
         root, version=__version__, language=args.language, baseline=args.baseline
     )
@@ -1119,7 +1242,21 @@ def cmd_init(args) -> int:
     if advisory:
         print(f"warn:    {advisory}")
 
-    resolved = identity.try_resolve(root)
+    if profile.workspace:
+        print(
+            "workspace: control "
+            + (profile.control_path or ".")
+            + "; repos "
+            + ", ".join(repo.name for repo in profile.workspace_repos)
+        )
+        for state in _repos(profile):
+            if not state["present"]:
+                print(
+                    f"note:    {state['path']} is not checked out here; its changes "
+                    "will be invisible to the gate on this machine"
+                )
+
+    resolved = identity.try_resolve_for(profile)
     if resolved is None:
         print('identity: none — run `git config --global lite-dev.owner "Your Name"`')
     else:
@@ -1130,8 +1267,10 @@ def cmd_init(args) -> int:
             "\nadopt:\n"
             "  1. Keep the existing tree. Drift is a warning; a missing required\n"
             "     document or a broken link is an error. Silence each real conflict\n"
-            '     with [[exempt]] (check = "links" | "index" | "zero_fact", path,\n'
-            "     reason, until) instead of turning a check off for the project.\n"
+            '     with [[exempt]] (check = "links" | "index" | "absolute" |\n'
+            '     "escape" | "zero_fact", path, reason, until) instead of turning a\n'
+            "     check off for the project. Name requirement and asset stores in\n"
+            '     [docs] stores = [...] rather than exempting them one by one.\n'
             "  2. Commit the scaffold, then `flow.py init --baseline` so only work\n"
             "     after adoption is debt; `flow.py reconcile` never blocks.\n"
             "  3. Make the first item the one that converges the facts with no single\n"
@@ -1187,6 +1326,10 @@ def cmd_reconcile(args) -> int:
         since = args.since or (previous.source if previous else None)
         if not since and profile.reconcile_baseline:
             since = profile.reconcile_baseline
+        bound = profile.channel(channel)
+        repo_root = profile.repo_root(
+            bound.repo if bound else profile.control_path
+        )
         source = (
             "--since"
             if args.since
@@ -1194,12 +1337,12 @@ def cmd_reconcile(args) -> int:
             if previous
             else "[reconcile] baseline"
         )
-        if since and not git.has_commit(profile.root, since):
+        if since and not git.has_commit(repo_root, since):
             raise FlowError(
                 f"unknown commit {since[:7]} from {source}; it is not in this clone. "
                 "Fetch first, or pass a commit from this history."
             )
-        if since and not git.is_ancestor(profile.root, since, git.head(profile.root)):
+        if since and not git.is_ancestor(repo_root, since, git.head(repo_root)):
             raise FlowError(
                 f"{source} {since[:7]} is not an ancestor of HEAD; this clone is "
                 "behind or on a different history. Fetch and pull."
@@ -1362,6 +1505,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(gate_parser)
     gate_parser.add_argument("--level", choices=profile_mod.LEVELS, default="l1")
     gate_parser.add_argument("--work", help="work item id; enforces the design rule")
+    gate_parser.add_argument(
+        "--repo",
+        action="append",
+        help="limit the gate to this repository (repeatable; . is the control repo)",
+    )
     gate_parser.add_argument("--timeout", type=int, default=1800, help="seconds per command")
     gate_parser.set_defaults(func=cmd_gate)
 

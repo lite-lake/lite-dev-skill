@@ -30,6 +30,11 @@ def _run(root: Path, *args: str, check: bool = True) -> str:
 
 
 def _exec(root: Path, *args: str) -> subprocess.CompletedProcess:
+    if not root.exists():
+        raise GitError(
+            f"{root} does not exist; check the path in the profile, or fetch that "
+            "checkout"
+        )
     try:
         return subprocess.run(
             ["git", *args],
@@ -44,6 +49,8 @@ def _exec(root: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def is_repo(root: Path) -> bool:
+    if not root.exists():
+        return False
     output = _run(root, "rev-parse", "--is-inside-work-tree", check=False).strip()
     return output == "true"
 
@@ -55,6 +62,20 @@ def git_dir(root: Path) -> Path | None:
     the working tree, so it is never a dirty path and never gets committed.
     """
     process = _exec(root, "rev-parse", "--absolute-git-dir")
+    if process.returncode != 0:
+        return None
+    text = process.stdout.strip()
+    return Path(text) if text else None
+
+
+def repo_of(path: Path) -> Path | None:
+    """The work tree that contains `path`, or None when it is untracked.
+
+    Used when a file is written or read outside a declared repository: the
+    answer tells the caller whether a teammate will ever see the change.
+    """
+    start = path if path.is_dir() else path.parent
+    process = _exec(start, "rev-parse", "--show-toplevel")
     if process.returncode != 0:
         return None
     text = process.stdout.strip()

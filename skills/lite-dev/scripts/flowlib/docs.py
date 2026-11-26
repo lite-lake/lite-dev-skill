@@ -7,6 +7,7 @@ version is a copy of a fact whose authority lives somewhere else.
 """
 from __future__ import annotations
 
+import fnmatch
 import re
 from datetime import date
 from pathlib import Path
@@ -90,16 +91,32 @@ class _Exemptions:
         return errors, warnings
 
 
+def _doc_roots(profile: Profile) -> list[Path]:
+    """The document trees to check: the docs directory and any extra surfaces.
+
+    A workspace usually keeps engineering documents in one repository and
+    package-level documents next to the code; `[docs] surfaces` names the
+    latter instead of forcing `docs_dir = "."` and walking `node_modules`.
+    """
+    roots = [profile.docs_path]
+    for surface in profile.docs_surfaces:
+        candidate = profile.root / surface
+        if candidate not in roots:
+            roots.append(candidate)
+    return roots
+
+
 def markdown_files(profile: Profile) -> list[Path]:
-    """Required documents plus every markdown file under the docs directory."""
+    """Required documents plus every markdown file under a document root."""
     found: set[Path] = set()
     for relative in profile.required_docs:
         path = profile.root / relative
         if path.is_file() and path.suffix.lower() in (".md", ".markdown"):
             found.add(path)
-    docs = profile.docs_path
-    if docs.is_dir():
-        for path in docs.rglob("*.md"):
+    for base in _doc_roots(profile):
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*.md"):
             if path.is_file() and not _is_hidden(path.relative_to(profile.root)):
                 found.add(path)
     return sorted(found)
@@ -136,41 +153,75 @@ def _targets(text: str) -> list[str]:
     return targets
 
 
-def _resolves(base: Path, target: str) -> bool:
+def _resolve_target(base: Path, target: str) -> Path | None:
     candidate = (base / target).resolve()
     if candidate.exists():
-        return True
+        return candidate
     if not Path(target).suffix:
         for suffix in (".md", "/README.md", "/index.md"):
-            if (base / f"{target}{suffix}").exists():
-                return True
-    return False
+            alternative = base / f"{target}{suffix}"
+            if alternative.exists():
+                return alternative.resolve()
+    return None
 
 
-def link_errors(profile: Profile, exempt: _Exemptions) -> list[str]:
+def _under_root(profile: Profile, path: Path) -> bool:
+    try:
+        path.relative_to(profile.root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def link_errors(
+    profile: Profile, exempt: _Exemptions
+) -> tuple[list[str], list[str]]:
+    """Resolve relative links; report absolute ones and escapes separately.
+
+    A broken link is an error: the document points at nothing. An absolute path
+    is a warning: it resolves on the machine that wrote it and nowhere else, so
+    it is debt to pay down, not a reason to block a release. A link that leaves
+    the project root is the same kind of debt unless a workspace owns the
+    target, which is why both are bounded silences rather than switches.
+    """
     errors: list[str] = []
+    warnings: list[str] = []
     for path in markdown_files(profile):
         text = _strip_code(artifacts.read_text(path))
+        label = path.relative_to(profile.root).as_posix()
         seen: set[str] = set()
         for target in _targets(text):
             if target in seen:
                 continue
             seen.add(target)
-            if _resolves(path.parent, target):
+            if Path(target).is_absolute():
+                if not exempt.allows("absolute", path):
+                    warnings.append(
+                        f"{label}: absolute link target {target}; it resolves on one "
+                        "machine only — use a relative path"
+                    )
                 continue
-            if exempt.allows("links", path):
+            resolved = _resolve_target(path.parent, target)
+            if resolved is None:
+                if exempt.allows("links", path):
+                    continue
+                errors.append(f"{label}: link target does not exist: {target}")
                 continue
-            errors.append(
-                f"{path.relative_to(profile.root)}: link target does not exist: {target}"
-            )
-    return errors
+            if not _under_root(profile, resolved) and not exempt.allows("escape", path):
+                warnings.append(
+                    f"{label}: link target leaves the project root: {target}; "
+                    "declare the repository in [[workspace.repo]] or link a "
+                    "document that lives here"
+                )
+    return errors, warnings
 
 
 def _index_dirs(profile: Profile) -> list[Path]:
     dirs: list[Path] = []
-    docs = profile.docs_path
-    if docs.is_dir():
-        for readme in sorted(docs.rglob("README.md")):
+    for base in _doc_roots(profile):
+        if not base.is_dir():
+            continue
+        for readme in sorted(base.rglob("README.md")):
             relative = readme.relative_to(profile.root)
             if readme.is_file() and not _is_hidden(relative):
                 dirs.append(readme.parent)
@@ -209,25 +260,41 @@ def index_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
     return warnings
 
 
+def _store_match(relative: str, pattern: str) -> bool:
+    """A record store is a path prefix, a glob, or a glob on an ancestor.
+
+    `docs/projects/*/prds` must cover the directory and everything under it,
+    including deeper month folders, without listing each one.
+    """
+    pattern = pattern.strip().rstrip("/")
+    if not pattern:
+        return False
+    if fnmatch.fnmatch(relative, pattern) or _under(relative, pattern):
+        return True
+    parts = relative.split("/")
+    for index in range(1, len(parts)):
+        if fnmatch.fnmatch("/".join(parts[:index]), pattern):
+            return True
+    return False
+
+
 def _excluded_from_index(profile: Profile, path: Path) -> bool:
     """Record stores and history are not part of the document tree.
 
     Items live under `work_dir` and are listed by `status`; release records are
-    ordered by the commit graph. Neither is reached by following README links,
-    and demanding an index for them would be noise.
+    ordered by the commit graph. A workspace also keeps requirement and asset
+    stores it does not navigate as documents, and `[docs] stores` names them.
+    Neither is reached by following README links, and demanding an index for
+    them would be noise.
     """
     relative = path.relative_to(profile.root)
     if _is_hidden(relative):
         return True
     if artifacts.ARCHIVE_DIR in relative.parts:
         return True
-    for store in (profile.work_path, profile.release_path):
-        try:
-            path.relative_to(store)
-        except ValueError:
-            continue
-        return True
-    return False
+    stores = [*profile.docs_stores, profile.work_dir, profile.release_dir]
+    text = relative.as_posix()
+    return any(_store_match(text, store) for store in stores if store)
 
 
 def _edge_target(path: Path, target: str) -> Path | None:
@@ -255,13 +322,17 @@ def index_graph_warnings(profile: Profile, exempt: _Exemptions) -> list[str]:
     from `docs_dir/README.md` and reports the indexes it cannot reach.
     """
     docs = profile.docs_path
-    if not docs.is_dir():
+    roots = [base for base in _doc_roots(profile) if base.is_dir()]
+    if not roots:
         return []
-    files = [
-        path
-        for path in docs.rglob("*.md")
-        if path.is_file() and not _excluded_from_index(profile, path)
-    ]
+    files = []
+    for base in roots:
+        files.extend(
+            path
+            for path in base.rglob("*.md")
+            if path.is_file() and not _excluded_from_index(profile, path)
+        )
+    files = sorted(set(files))
     if not files:
         return []
 
@@ -604,7 +675,9 @@ def problems(profile: Profile) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     warnings.extend(switch_warnings(profile))
     if profile.docs_check_links:
-        errors.extend(link_errors(profile, exempt))
+        link_problems, link_warnings = link_errors(profile, exempt)
+        errors.extend(link_problems)
+        warnings.extend(link_warnings)
     errors.extend(heading_errors(profile, exempt))
     errors.extend(decisions_errors(profile))
     warnings.extend(index_warnings(profile, exempt))

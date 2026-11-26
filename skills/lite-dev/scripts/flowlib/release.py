@@ -22,6 +22,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 class ReleaseRecord:
     path: Path
     channel: str
+    repo: str
     date: str
     source: str
     previous: str
@@ -32,12 +33,22 @@ class ReleaseRecord:
     def short(self) -> str:
         return self.source[:7]
 
+    @property
+    def repo_label(self) -> str:
+        return self.repo or "."
+
 
 def load_records(profile: Profile) -> list[ReleaseRecord]:
-    """Read every record. A configured channel's record must be complete."""
+    """Read every record. A configured channel's record must be complete.
+
+    `repo` names the repository whose history the record's shas belong to. A
+    record written before workspaces existed has no such field and means the
+    control repository, so old record stores keep working unchanged.
+    """
     directory = profile.release_path
     if not directory.is_dir():
         return []
+    declared = {repo.path for repo in profile.workspace_repos}
     found: list[ReleaseRecord] = []
     for path in sorted(directory.glob("*.md")):
         meta, _ = artifacts.parse_frontmatter(artifacts.read_text(path))
@@ -46,6 +57,22 @@ def load_records(profile: Profile) -> list[ReleaseRecord]:
             continue
         source = (meta.get("source") or "").strip()
         previous = (meta.get("previous") or "").strip() or "none"
+        repo = (meta.get("repo") or "").strip()
+        repo = "" if repo in (".", "") else repo.rstrip("/")
+        bound = profile.channel(channel)
+        if bound is not None:
+            if repo and repo != bound.repo:
+                raise FlowError(
+                    f"{path.name}: record says repo {repo!r} but channel {channel!r} is "
+                    f"bound to {bound.repo or '.'}; do not edit a recorded release, "
+                    "write a new record instead"
+                )
+            repo = bound.repo
+        if repo and repo not in declared:
+            raise FlowError(
+                f"{path.name}: record names repo {repo!r}, which is not declared in "
+                "[[workspace.repo]]; declare it or write a new record"
+            )
         if channel in profile.release_channels:
             if not source:
                 raise FlowError(
@@ -67,6 +94,7 @@ def load_records(profile: Profile) -> list[ReleaseRecord]:
             ReleaseRecord(
                 path=path,
                 channel=channel,
+                repo=repo,
                 date=(meta.get("date") or "").strip(),
                 source=source,
                 previous=previous,
@@ -77,13 +105,19 @@ def load_records(profile: Profile) -> list[ReleaseRecord]:
     return found
 
 
+def _repo_root(profile: Profile, channel: str) -> Path:
+    bound = profile.channel(channel)
+    return profile.repo_root(bound.repo if bound else profile.control_path)
+
+
 def _ordered(profile: Profile, records: list[ReleaseRecord]) -> list[ReleaseRecord]:
     """Sort by one topological walk, so ancestry is O(1) per adjacent pair."""
+    root = _repo_root(profile, records[0].channel) if records else profile.control_root
     sources = sorted({record.source for record in records})
     rank = {
         sha: index
         for index, sha in enumerate(
-            git.rev_list(profile.root, "--topo-order", "--reverse", *sources)
+            git.rev_list(root, "--topo-order", "--reverse", *sources)
         )
     }
     return sorted(
@@ -99,25 +133,27 @@ def _ordered(profile: Profile, records: list[ReleaseRecord]) -> list[ReleaseReco
 def chain(profile: Profile, channel: str) -> list[ReleaseRecord]:
     """Order a channel's records by commit ancestry and validate the links.
 
-    Raises FlowError when the clone is missing a commit, when two records
-    diverged, or when `previous` does not match the record before it. A release
-    must not proceed on a channel whose history is ambiguous.
+    The chain rule is unchanged — one chain per channel, ordered by one commit
+    graph — but the graph is the channel's repository, not the workspace. Raises
+    FlowError when the clone is missing a commit, when two records diverged, or
+    when `previous` does not match the record before it.
     """
-    git.ensure_repo(profile.root)
+    root = _repo_root(profile, channel)
+    git.ensure_repo(root)
     records = [record for record in load_records(profile) if record.channel == channel]
     if not records:
         return []
 
     for record in records:
-        if not git.has_commit(profile.root, record.source):
+        if not git.has_commit(root, record.source):
             raise FlowError(
-                f"{record.path.name} references {record.short}, which is not in this clone; "
-                "fetch the channel history before releasing"
+                f"{record.path.name} references {record.short}, which is not in the "
+                f"{record.repo_label} clone; fetch that repository before releasing"
             )
-        if record.previous != "none" and not git.has_commit(profile.root, record.previous):
+        if record.previous != "none" and not git.has_commit(root, record.previous):
             raise FlowError(
-                f"{record.path.name}: previous {record.previous[:7]} is not in this clone; "
-                "fetch before releasing"
+                f"{record.path.name}: previous {record.previous[:7]} is not in the "
+                f"{record.repo_label} clone; fetch before releasing"
             )
 
     ordered = _ordered(profile, records)
@@ -133,7 +169,7 @@ def chain(profile: Profile, channel: str) -> list[ReleaseRecord]:
                 )
             continue
         before = ordered[index - 1]
-        if not git.is_ancestor(profile.root, before.source, record.source):
+        if not git.is_ancestor(root, before.source, record.source):
             raise FlowError(
                 f"channel {channel!r} has divergent release records: "
                 f"{before.path.name} ({before.short}, by {before.by or '-'}) and "
@@ -146,7 +182,7 @@ def chain(profile: Profile, channel: str) -> list[ReleaseRecord]:
             raise FlowError(
                 f"{record.path.name}: previous {record.previous[:7]} does not follow "
                 f"{before.path.name} ({before.short}); release records form one chain. "
-                "If {record.path.name} was recorded from a stale clone, revert the "
+                f"If {record.path.name} was recorded from a stale clone, revert the "
                 "commit that added it (a new commit, not an edit), then record again "
                 "from the true tip."
             )
@@ -182,10 +218,12 @@ def render(
     rollback: str,
     notes: str,
     authorization: str = "None",
+    repo: str = "",
 ) -> str:
     text = TEMPLATE.read_text(encoding="utf-8")
     for token, value in {
         "<CHANNEL>": channel,
+        "<REPO>": repo or ".",
         "<DATE>": day,
         "<SHA>": source,
         "<PREVIOUS>": previous,
