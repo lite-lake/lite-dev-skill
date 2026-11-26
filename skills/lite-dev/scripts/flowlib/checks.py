@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from . import artifacts, git, identity
+from . import artifacts, docs, git, identity
 from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile
 
 DESIGN_SECTIONS = (
@@ -269,6 +269,84 @@ def owner_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
     return warnings
 
 
+def _path_matches(path: str, prefixes: list[str]) -> bool:
+    return any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in prefixes)
+
+
+def risk_gate(
+    item: artifacts.Item, profile: Profile, changed: list[str]
+) -> tuple[list[str], list[str]]:
+    """Paths that demand a design, and the exemption that keeps docs from tripping it.
+
+    `risk_paths` are structural: contracts, schema, permissions, deploy scripts.
+    `risk_exempt` is the escape hatch that makes the rule usable — a work item
+    whose only change is prose about a risk path must not require a design.
+    """
+    if not profile.design_risk_paths or not changed:
+        return [], []
+    touched = sorted(
+        {
+            path
+            for path in changed
+            if _path_matches(path, profile.design_risk_paths)
+            and not _path_matches(path, profile.design_risk_exempt)
+        }
+    )
+    if not touched or item.design_status == "ready":
+        return [], []
+    listed = ", ".join(touched[:3]) + (f" (+{len(touched) - 3} more)" if len(touched) > 3 else "")
+    message = (
+        f"{item.id} changes a risk path ({listed}) without a ready design; "
+        "write design.md and run flow.py design-ready <ID>, or narrow the change"
+    )
+    if profile.design_risk_gate == "block":
+        return [message], []
+    return [], [message]
+
+
+def changed_paths(profile: Profile, item: artifacts.Item) -> list[str]:
+    """The item's work: uncommitted paths plus paths in its own commits.
+
+    Reading commits is bounded so a long history cannot make the gate slow; the
+    worktree alone would miss work the implementer already committed.
+    """
+    paths: list[str] = []
+    try:
+        if not git.is_repo(profile.root):
+            return paths
+        paths.extend(git.worktree_paths(profile.root))
+        recent = git.commits(profile.root, limit=200)
+        owned = [
+            commit
+            for commit in recent
+            if item.id and item.id in f"{commit.subject}\n{commit.body}"
+        ]
+        paths.extend(git.files_many(profile.root, [commit.sha for commit in owned]))
+    except git.GitError:
+        return paths
+    return list(dict.fromkeys(paths))
+
+
+def fallback_warnings(profile: Profile, level: str, changed: list[str]) -> list[str]:
+    """A cheap level does not cover a dependency-file change; say so.
+
+    This is the contract behind l1: it is fast because it is scoped, and a
+    change that invalidates the scope has to fall back to the full level.
+    """
+    if not profile.gate_fallback_paths or not changed:
+        return []
+    full = profile.full_level
+    if full is None or level == full:
+        return []
+    hits = sorted({path for path in changed if _path_matches(path, profile.gate_fallback_paths)})
+    if not hits:
+        return []
+    return [
+        f"changed {', '.join(hits[:3])} invalidates {level}; "
+        f"run gate --level {full} before committing"
+    ]
+
+
 def quotepath_warnings(profile: Profile, items: list[artifacts.Item]) -> list[str]:
     """Non-ASCII slugs read as escapes until `core.quotepath` is off."""
     if not any(artifacts.CJK_RE.search(item.directory.name) for item in items):
@@ -298,6 +376,16 @@ def layout_problems(profile: Profile) -> tuple[list[str], list[str]]:
         return errors, warnings
     for bucket in sorted(profile.work_path.iterdir()):
         if not bucket.is_dir():
+            continue
+        if bucket.name == artifacts.ARCHIVE_DIR:
+            for month in sorted(bucket.iterdir()):
+                if not month.is_dir() or month.name == "README.md":
+                    continue
+                if not artifacts.MONTH_RE.match(month.name):
+                    warnings.append(
+                        f"{artifacts.ARCHIVE_DIR}/{month.name}: archived items keep their "
+                        "month bucket; move it into a YYYY-MM directory or restore it"
+                    )
             continue
         if not artifacts.MONTH_RE.match(bucket.name):
             errors.append(
@@ -332,6 +420,9 @@ def check_project(
         layout_errors, layout_warnings = layout_problems(profile)
         errors.extend(layout_errors)
         warnings.extend(layout_warnings)
+        doc_errors, doc_warnings = docs.problems(profile)
+        errors.extend(doc_errors)
+        warnings.extend(doc_warnings)
 
     items = artifacts.all_items(profile)
     if work is None:

@@ -32,11 +32,18 @@ partially mechanised.
 - A change is not submit-ready because it was reviewed or "works locally".
 - The gate runs the project's own commands; the tool never invents one.
 - Gate levels: l1 iterates, l2 accepts a batch, l3 commits/releases.
+- A cheap level is scoped, not smaller: a change under `[gate] fallback_paths`
+  invalidates it, and the tool says so instead of staying quiet.
+- A structural change — a path under `[design] risk_paths` and not under
+  `risk_exempt` — is not submit-ready without a ready design.
 - **Enforced**: `gate` validates the applicable artifacts first — the item named
   by `--work` plus the profile's required documents, or the whole project when
   no item is named — then runs the profile's commands and returns their exit
   code. Another person's unfinished item does not block your batch; a release
-  still validates everything.
+  still validates everything. The strictest level's last PASS is recorded per
+  clone and reported as stale when it ages out (advisory, never a block);
+  `gate --work` warns or refuses a risk-path change without a ready design,
+  according to `[design] risk_gate`.
 
 ## 5. Implementation and verification are different contexts
 
@@ -80,8 +87,13 @@ partially mechanised.
   have exactly one home. Other documents link.
 - Entry documents (`README`, `AGENTS`) contain no version numbers, ports,
   service counts, or dates that will drift.
-- **Enforced**: `check` validates required documents and links; the zero-fact
-  rule is human.
+- Every document is reachable: a file in an indexed directory is linked from that
+  directory's `README.md`; every artifact in an item directory is mentioned by
+  its `item.md`.
+- **Enforced**: `check` reports missing required documents, unresolved relative
+  links, unindexed files, unmentioned item artifacts, duplicate headings in a
+  release record, version/port/date pins in entry documents, and a missing
+  decisions index. Whether the prose is true is still human.
 
 ## 10. Extensions may add, never remove
 

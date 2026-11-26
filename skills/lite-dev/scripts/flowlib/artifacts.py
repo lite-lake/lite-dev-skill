@@ -25,6 +25,10 @@ PLACEHOLDER_RE = re.compile(r"<[A-Za-z][^<>\n]*>")
 
 ITEM_FIELDS = ("id", "title", "type", "priority", "size", "mode", "owner", "created")
 
+# Archived items keep their month bucket under this name. It is not a month, so
+# the layout check and the item listing both have to know about it explicitly.
+ARCHIVE_DIR = "_archive"
+
 # The directory slug follows the title's script: a Chinese title keeps its
 # characters, anything else is word-joined with '-'. Width is counted in
 # characters, so 30 Chinese characters read like 60 columns.
@@ -232,17 +236,12 @@ def load_item(directory: Path) -> Item:
     )
 
 
-def all_items(profile: Profile) -> list[Item]:
-    """Items live at <work_dir>/<YYYY-MM>/<id>-<slug>/item.md.
-
-    Buckets are read whatever their name, so a misplaced item is still found and
-    reported by `check` instead of disappearing from the listing.
-    """
-    if not profile.work_path.is_dir():
+def _items_under(base: Path) -> list[Item]:
+    if not base.is_dir():
         return []
     items = []
-    for bucket in sorted(profile.work_path.iterdir()):
-        if not bucket.is_dir():
+    for bucket in sorted(base.iterdir()):
+        if not bucket.is_dir() or bucket.name == ARCHIVE_DIR:
             continue
         for directory in sorted(bucket.iterdir()):
             if directory.is_dir() and (directory / "item.md").is_file():
@@ -250,12 +249,26 @@ def all_items(profile: Profile) -> list[Item]:
     return items
 
 
+def all_items(profile: Profile) -> list[Item]:
+    """Open and finished items at <work_dir>/<YYYY-MM>/<id>-<slug>/item.md.
+
+    Buckets are read whatever their name, so a misplaced item is still found and
+    reported by `check` instead of disappearing from the listing. Archived items
+    are not part of the working set; `find_item` still resolves them by id.
+    """
+    return _items_under(profile.work_path)
+
+
+def archived_items(profile: Profile) -> list[Item]:
+    return _items_under(profile.work_path / ARCHIVE_DIR)
+
+
 def find_item(profile: Profile, item_id: str) -> Item:
     """Resolve an id exactly, or by a unique prefix. Never guess between matches."""
     query = (item_id or "").strip()
     if not query:
         raise FlowError("work item id is empty")
-    items = all_items(profile)
+    items = all_items(profile) + archived_items(profile)
     exact = [item for item in items if item.id == query or item.directory.name == query]
     matches = exact or [
         item
@@ -269,9 +282,13 @@ def find_item(profile: Profile, item_id: str) -> Item:
     lines = [f"ambiguous work item {query!r}: {len(matches)} matches"]
     for item in matches:
         title = item.meta.get("title", "")
-        lines.append(f"  {item.id}  {title}  ({item.status})")
+        lines.append(f"  {item.id}  {title}  ({item.status})  {_archive_label(item)}")
     lines.append("use the full id (flow.py status lists them)")
     raise FlowError("\n".join(lines))
+
+
+def _archive_label(item: Item) -> str:
+    return "archived" if ARCHIVE_DIR in item.directory.parts else "active"
 
 
 def ac_ids(item: Item) -> list[str]:

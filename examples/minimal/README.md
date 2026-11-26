@@ -15,6 +15,7 @@ python3 $SKILL/scripts/flow.py status
 python3 $SKILL/scripts/flow.py new --title "Export CSV" --type REQ --size S
 python3 $SKILL/scripts/flow.py check
 python3 $SKILL/scripts/flow.py gate --level l1
+python3 $SKILL/scripts/flow.py handoff <ID>      # the prompt for the next session
 ```
 
 `flow.py` walks up from the current directory and finds `docs/flow/profile.toml`.
@@ -32,6 +33,8 @@ python3 $SKILL/scripts/flow.py gate --level l1
    set `- Status: clarified`.
 2. For S/M, no design is required: implement, run `check`, run `gate --level l3`.
 3. Tick the AC boxes you can prove, then `flow.py done <ID>`.
+4. `flow.py archive <ID>` when the item is history; `status` then counts it as
+   archived instead of listing it.
 
 For an L item, copy `design.md` from the skill's templates, speak the plan to a
 human, record `Confirmed: yes`, run `design-ready`, then implement batch by batch.

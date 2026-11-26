@@ -44,6 +44,9 @@ risk_paths = ["migrations/"]
   `gate`, `docs`, `reconcile`. Anything else is an error, so a typo cannot
   silently do nothing.
 - `[docs]` may only contain `required`; `[reconcile]` may only contain `risk_paths`.
+- A command may contain `{skill}`. The loader replaces it with the installed
+  skill directory (shell-quoted), which is how a bundled extension runs a script
+  it ships next to its `extension.toml` without hardcoding a machine path.
 
 ## Merge rules
 
@@ -66,6 +69,18 @@ flow.py extensions
 Prints the lite-dev version, each extension's source (project or bundled), its
 `requires` range, and exactly what it adds.
 
+## Bundled
+
+| Extension | Adds | Use when |
+|---|---|---|
+| `go-service` | build/vet/test commands and Go risk paths | the repository is a Go service |
+| `security-scan` | `security_scan` at l3; fails on tracked credentials | always, unless another scanner covers it |
+| `deploy-lane` | `deploy_check` at l3; validates deployment manifests | one commit ships to more than one environment |
+
+Bundled extensions ship their scripts inside
+`extensions/<name>/`; copy the directory into `docs/flow/extensions/<name>/` to
+change its behaviour, and keep exactly one copy.
+
 ## Shipping an extension from a framework
 
 Keep `extension.toml` and a README in the framework repository, for example
@@ -74,4 +89,5 @@ Keep `extension.toml` and a README in the framework repository, for example
 change. An extension is trusted project configuration: it contains shell
 commands, so review it like a build script.
 
-Bundled example: `extensions/go-service/`.
+Bundled examples: `extensions/go-service/`, `extensions/security-scan/`,
+`extensions/deploy-lane/`.

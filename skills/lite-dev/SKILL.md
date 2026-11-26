@@ -12,7 +12,8 @@ license: BSD-2-Clause
 > Run every command from the project root.
 > There is exactly one flow. Do not invent states, roles, or approvals.
 > Tools: `new`, `status`, `check`, `design-ready`, `gate`, `done`, `claim`,
-> `whoami`, `release`, `reconcile`, `extensions`.
+> `whoami`, `handoff`, `archive`, `unarchive`, `release`, `reconcile`,
+> `extensions`.
 
 ## 0. Four principles
 
@@ -40,10 +41,13 @@ Never edit a status by hand.
 | S/M, one session | nothing else | `new` → edit → `check` |
 | L, risky, multi-batch | [references/one-shot-vs-two-phase.md](references/one-shot-vs-two-phase.md) | `new` → design → `design-ready` |
 | Phase B implementation | [references/roles.md](references/roles.md) | `gate --level l1` per batch |
+| Session boundary or resume | — | `handoff <ID> [--batch Bx]` |
 | Harness has no subagents | [references/harness-modes.md](references/harness-modes.md) | sequential roles |
 | Releasing | [references/release-channels.md](references/release-channels.md) | `release --channel <name>` |
 | More than one person or machine | [references/collaboration.md](references/collaboration.md) | set `lite-dev.owner`, then `new` |
 | Others bypassed the flow | [references/reconcile.md](references/reconcile.md) | `reconcile` |
+| Docs drifting (links, indexes, pins) | [references/docs-hygiene.md](references/docs-hygiene.md) | `check` |
+| Retiring a finished item | — | `archive <ID>` |
 | A project ships an extension | [references/extensions.md](references/extensions.md) | `extensions` |
 | Stuck or repeated failure | [references/anti-patterns.md](references/anti-patterns.md) | — |
 
@@ -81,6 +85,8 @@ python3 <skill>/scripts/flow.py design-ready <ID>
 python3 <skill>/scripts/flow.py gate --level l1 --work <ID>
 python3 <skill>/scripts/flow.py claim <ID>
 python3 <skill>/scripts/flow.py done <ID>
+python3 <skill>/scripts/flow.py handoff <ID> [--batch Bx]
+python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
 python3 <skill>/scripts/flow.py whoami
 python3 <skill>/scripts/flow.py release --channel staging
 python3 <skill>/scripts/flow.py reconcile
@@ -91,7 +97,8 @@ python3 <skill>/scripts/flow.py extensions
   `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
   (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
   `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
-- `check` validates fields, AC, links, and design rules; `--work` limits it to one item.
+- `check` validates fields, AC, design rules, and document hygiene (links,
+  indexes, entry-document facts); `--work` limits it to one item.
 - `design-ready` refuses an incomplete design and writes `status: ready`.
 - `gate` validates the item under `--work` (or the whole project), then runs the
   profile's commands for a level.
@@ -99,6 +106,13 @@ python3 <skill>/scripts/flow.py extensions
   person's open item needs `--takeover`.
 - `done` refuses unchecked AC and a missing required design; it records
   `closed_by` and warns when the closer is not the owner.
+- `handoff` prints a cold-start prompt built from the artifacts: paths, the
+  handoff summary, batch progress, the next batch, the gate command. Use it at a
+  session boundary instead of retyping context; `--batch` prints the implement
+  dispatch for one batch.
+- `archive` moves a closed item to `<work_dir>/_archive/<YYYY-MM>/` and records
+  it in that directory's README; `unarchive` moves it back. Archived items are
+  resolved by id but are not part of the working set.
 - `whoami` prints the resolved identity and where it came from; run it on every
   machine.
 - `release` plans; `--record` runs the gate and writes the channel record.
@@ -124,6 +138,8 @@ candidates listed: use the full id, never guess.
 Extensions may add commands, gate steps, required docs, and risk paths. They may
 not replace a command, change a gate level, remove a rule, or alter the state
 machine. The loader rejects unknown keys and incompatible `requires` ranges.
+A bundled extension ships its scripts inside the skill and names them with
+`{skill}`; the loader expands it, so nothing is hardcoded per machine.
 Details: [references/extensions.md](references/extensions.md).
 
 ## 6. Writing a design
@@ -146,6 +162,13 @@ batch the main branch builds and passes the gate.
 - A failing gate is fixed, not argued with. The same failure three times means stop and ask.
 - `gate --work <ID>` validates that item and the profile's required documents,
   then runs the commands. A bare `check` and a release still validate the project.
+- A change under `[gate] fallback_paths` (lock files, schema runs, toolchain pins)
+  invalidates the cheap level: the gate says to run the strictest one.
+- The strictest level's last PASS is remembered per clone. `status` and a cheaper
+  gate tell you when it is stale; this is advisory, never a block.
+- `[design] risk_paths` makes a change structural: without a ready design the gate
+  warns, or blocks when `risk_gate = "block"`. `risk_exempt` is what keeps a
+  documentation change about those paths from tripping the rule.
 
 ## 8. Independent verification
 
@@ -177,6 +200,8 @@ An implementer saying "tested" is not evidence.
 - Guessing which item an ambiguous id means, or editing an id by hand.
 - Taking over someone's open item without `--takeover` and a reason.
 - Editing a recorded release's `source` or `previous`.
+- Pinning a version, port, or date in an entry document instead of linking its one authority.
+- Archiving an open item, or editing an item in the archive instead of unarchiving it.
 - Force push, rewriting shared history, committing secrets.
 - Weakening a core rule through an extension.
 
@@ -189,6 +214,7 @@ An implementer saying "tested" is not evidence.
 - [Teams and machines](references/collaboration.md)
 - [Release channels](references/release-channels.md)
 - [Reconcile](references/reconcile.md)
+- [Docs hygiene](references/docs-hygiene.md)
 - [Extensions](references/extensions.md)
 - [Anti-patterns](references/anti-patterns.md)
 - [Invariants (source of truth)](references/invariants.md)

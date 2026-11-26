@@ -95,11 +95,13 @@ skills/lite-dev/            the installable skill: everything is inside
   SKILL.md                  entry point: principles, routing, stop conditions, red lines
   profile.template.toml     copy to docs/flow/profile.toml
   references/               invariants + depth, loaded per situation
-  templates/                item, design, test report, implementation, release, retro
-  extensions/               bundled declarative add-ons (go-service)
+  templates/                item, design, test report, implementation, release, retro, decision
+  extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
   scripts/flow.py           new / claim / whoami / status / check / design-ready /
-                            gate / done / release / reconcile / extensions
-  scripts/flowlib/          profile, identity, artifacts, checks, command runner,
+                            gate / done / handoff / archive / unarchive / release /
+                            reconcile / extensions
+  scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
+                            gate ledger, handoff, archive, command runner,
                             atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
 examples/minimal/           a working single-repo project
@@ -116,6 +118,9 @@ examples/minimal/           a working single-repo project
 | design gate (confirmation, rollback, gaps) | failure diagnosis |
 | running profile commands, exit codes | black-box acceptance judgement |
 | release chain ordered by commit ancestry | deployment judgement |
+| handoff prompt assembled from the artifacts | the judgement behind the next step |
+| document reachability, index coverage, entry-document pins | whether the prose is true |
+| risk-path design gate, per-clone gate freshness | how risky a change actually is |
 
 Anything left of the line is a script because agents self-report it badly.
 Anything right of the line is prose because a script would get it wrong.
@@ -145,7 +150,11 @@ are not written into `--note`.
 
 Extensions are declarative and additive: commands, gate steps, required docs,
 risk paths. The loader rejects command collisions, unknown keys, and an
-incompatible `requires` range.
+incompatible `requires` range. A bundled extension may ship a script and name it
+with `{skill}`, which the loader expands to the installed skill directory.
+
+Bundled: `go-service` (build/vet/test and Go risk paths), `security-scan` (fails
+on tracked credentials), `deploy-lane` (validates deployment manifests).
 
 ## Teams and multiple machines
 
@@ -182,9 +191,11 @@ Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 ## Status
 
 The current release implements `new`, `claim`, `whoami`, `status`, `check`,
-`design-ready`, `gate`, `done`, `release`, `reconcile`, `extensions`, the
-templates, the invariants, and a runnable single-repo example. Planned: a
-multi-repo workspace profile.
+`design-ready`, `gate`, `done`, `handoff`, `archive`, `unarchive`, `release`,
+`reconcile`, `extensions`, the templates (including `decision.md`), the
+invariants, document hygiene checks, the risk-path design gate, the per-clone
+gate ledger, three bundled extensions, and a runnable single-repo example.
+Planned: a multi-repo workspace profile.
 
 Versions and breaking changes live in `CHANGELOG.md` ([中文](CHANGELOG.zh.md)).
 

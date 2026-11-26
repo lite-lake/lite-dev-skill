@@ -89,12 +89,13 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
   SKILL.md                  入口：原则、路由、停止条件、红线
   profile.template.toml     复制到 docs/flow/profile.toml
   references/               不变量 + 按情境加载的细则
-  templates/                item / design / test-report / implementation / release / retro
-  extensions/               随 skill 分发的声明式扩展（go-service）
+  templates/                item / design / test-report / implementation / release / retro / decision
+  extensions/               随 skill 分发的扩展（go-service、security-scan、deploy-lane）
   scripts/flow.py           new / claim / whoami / status / check / design-ready /
-                            gate / done / release / reconcile / extensions
-  scripts/flowlib/          profile、身份、产物解析、检查、命令执行、
-                            原子写入与写者锁
+                            gate / done / handoff / archive / unarchive / release /
+                            reconcile / extensions
+  scripts/flowlib/          profile、身份、产物解析、检查、文档卫生、门禁账本、
+                            交接提示词、归档、命令执行、原子写入与写者锁
   scripts/tests/            单元测试 + 端到端验收
 examples/minimal/           可直接跑的单仓库示例项目
 ```
@@ -110,6 +111,9 @@ examples/minimal/           可直接跑的单仓库示例项目
 | 设计门禁（确认、回滚、缺口） | 故障诊断 |
 | 执行 profile 命令、退出码 | 黑盒验收判断 |
 | 按提交图排序的发布链 | 部署判断 |
+| 从产物拼出交接提示词 | 下一步该做什么的判断 |
+| 文档可达性、索引覆盖、入口文档的事实 | 文字是否属实 |
+| 风险路径的设计门、本克隆的门禁新鲜度 | 改动实际有多险 |
 
 线左边一律交给脚本，因为 Agent 自己汇报这类事总是失真；
 线右边一律交给文字，因为脚本会判断错。
@@ -135,7 +139,11 @@ flow.py extensions                     # 每个扩展贡献了什么
 提交。
 
 扩展是声明式、只加不减的：命令、门禁步骤、必需文档、风险路径。加载器拒绝命令冲突、
-未知键和与 `requires` 不兼容的版本区间。
+未知键和与 `requires` 不兼容的版本区间。随 skill 分发的扩展可以自带脚本，并在命令里
+用 `{skill}` 引用，加载器会把它展开为已安装的 skill 目录。
+
+随附三个：`go-service`（build/vet/test 与 Go 风险路径）、`security-scan`（追踪文件里
+有凭据就让门禁失败）、`deploy-lane`（校验部署 manifest）。
 
 ## 团队与多台机器
 
@@ -164,8 +172,9 @@ flow.py extensions                     # 每个扩展贡献了什么
 ## 状态
 
 当前版本已实现 `new`、`claim`、`whoami`、`status`、`check`、`design-ready`、`gate`、
-`done`、`release`、`reconcile`、`extensions`、模板、不变量文档，以及可运行的单仓库
-示例。计划中：多仓库 workspace profile。
+`done`、`handoff`、`archive`、`unarchive`、`release`、`reconcile`、`extensions`，模板
+（含 `decision.md`）、不变量文档、文档卫生检查、风险路径设计门、按克隆记录的门禁
+账本、三个随附扩展，以及可运行的单仓库示例。计划中：多仓库 workspace profile。
 
 版本与破坏性变更见 `CHANGELOG.md`（[中文](CHANGELOG.zh.md)）。
 

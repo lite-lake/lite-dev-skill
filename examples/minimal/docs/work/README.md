@@ -25,3 +25,8 @@ Rules:
 - Do not add a status field. Status is derived from `## Clarify`, `design.md`, and `closed:`.
 - Keep AC ids (`AC01`) stable; design batches and test reports reference them.
 - Only the verifier ticks AC; only the orchestrator updates `## Implementation`.
+- A finished item stays here until it is archived: `flow.py archive <ID>` moves it
+  to `_archive/<YYYY-MM>/` and records it in `_archive/README.md`. Nothing is
+  deleted, and a live document links the archive index, never the item.
+- At a session boundary, `flow.py handoff <ID>` prints the prompt the next
+  session needs; do not retype it.

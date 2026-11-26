@@ -6,6 +6,7 @@ this package may contain a project name, repository name, or build command.
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from pathlib import Path
 from . import __version__
 
 PROFILE_REL = ("docs", "flow", "profile.toml")
+SKILL_ROOT = Path(__file__).resolve().parents[2]
+SKILL_TOKEN = "{skill}"
 TYPES = ("REQ", "BUG", "TD", "OPS", "IDEA")
 SIZES = ("S", "M", "L")
 PRIORITIES = ("P0", "P1", "P2", "P3")
@@ -41,13 +44,21 @@ class Profile:
     gate: dict[str, list[str]]
     design_required_for: list[str]
     design_require_confirmed: bool
+    design_risk_paths: list[str]
+    design_risk_exempt: list[str]
+    design_risk_gate: str
     required_docs: list[str]
+    docs_check_links: bool
+    docs_zero_fact: bool
+    docs_decisions: str
     release_channels: list[str]
     release_dir: str
     release_gate_level: str
     release_mainline: str
     release_require_artifacts: bool
     risk_paths: list[str]
+    gate_fallback_paths: list[str]
+    gate_fresh_days: int
     extensions_enabled: list[str]
     extensions_dir: str
     extension_info: list[dict]
@@ -65,6 +76,14 @@ class Profile:
     @property
     def release_path(self) -> Path:
         return self.root / self.release_dir
+
+    @property
+    def full_level(self) -> str | None:
+        """The strictest defined level: the one a cheap level cannot replace."""
+        for level in ("l3", "l2", "l1"):
+            if self.gate.get(level):
+                return level
+        return None
 
 
 def find_profile(start: Path | None = None) -> Path:
@@ -152,6 +171,18 @@ def satisfies(version: str, spec: str) -> bool:
         if operator == "==" and not current == wanted:
             return False
     return True
+
+
+def _expand(command: str) -> str:
+    """Replace `{skill}` with the installed skill root, shell-quoted.
+
+    A bundled extension ships scripts inside the skill; this is how its command
+    names one without hardcoding a machine path. The value comes from the
+    installed skill, never from project input.
+    """
+    if SKILL_TOKEN not in command:
+        return command
+    return command.replace(SKILL_TOKEN, shlex.quote(str(SKILL_ROOT)))
 
 
 def _id_pattern(id_format: str) -> re.Pattern:
@@ -319,7 +350,12 @@ def load(path: Path | str | None = None) -> Profile:
     project = raw["project"]
     id_table = raw["id"]
     commands = dict(raw["commands"])
-    gate = {level: list(steps) for level, steps in raw["gate"].items()}
+    gate_table = raw["gate"]
+    gate = {
+        level: list(steps)
+        for level, steps in gate_table.items()
+        if level in LEVELS and isinstance(steps, list)
+    }
     design = raw.get("design") or {}
     docs = raw.get("docs") or {}
     release = raw.get("release") or {}
@@ -331,14 +367,19 @@ def load(path: Path | str | None = None) -> Profile:
         project, ("name", "language", "owners", "docs_dir", "work_dir"), "[project]"
     )
     _allow_keys(id_table, ("format",), "[id]")
-    _allow_keys(design, ("required_for", "require_confirmed"), "[design]")
-    _allow_keys(docs, ("required",), "[docs]")
+    _allow_keys(
+        design,
+        ("required_for", "require_confirmed", "risk_paths", "risk_exempt", "risk_gate"),
+        "[design]",
+    )
+    _allow_keys(docs, ("required", "check_links", "zero_fact", "decisions"), "[docs]")
     _allow_keys(
         release, ("channels", "dir", "gate_level", "mainline", "require_artifacts"), "[release]"
     )
     _allow_keys(reconcile, ("risk_paths",), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
     _allow_keys(flow_table, ("requires",), "[flow]")
+    _allow_keys(gate, (*LEVELS, "fallback_paths", "fresh_days"), "[gate]")
 
     name = _require(project, "name", "[project]")
     language = project.get("language", "en")
@@ -369,8 +410,31 @@ def load(path: Path | str | None = None) -> Profile:
     require_confirmed = design.get("require_confirmed", True)
     if not isinstance(require_confirmed, bool):
         raise ProfileError("[design] require_confirmed must be true or false")
+    design_risk_paths = _string_list(design.get("risk_paths", []), "[design] risk_paths")
+    design_risk_exempt = _string_list(design.get("risk_exempt", []), "[design] risk_exempt")
+    design_risk_gate = design.get("risk_gate", "warn")
+    if design_risk_gate not in ("warn", "block"):
+        raise ProfileError("[design] risk_gate must be 'warn' or 'block'")
 
     required_docs = _string_list(docs.get("required", []), "[docs] required")
+    docs_check_links = docs.get("check_links", True)
+    docs_zero_fact = docs.get("zero_fact", True)
+    for label, value in (("check_links", docs_check_links), ("zero_fact", docs_zero_fact)):
+        if not isinstance(value, bool):
+            raise ProfileError(f"[docs] {label} must be true or false")
+    docs_decisions = docs.get("decisions", "")
+    if not isinstance(docs_decisions, str):
+        raise ProfileError("[docs] decisions must be a relative path or empty")
+    docs_decisions = docs_decisions.strip()
+    if docs_decisions and Path(docs_decisions).is_absolute():
+        raise ProfileError("[docs] decisions must be relative to the project root")
+
+    gate_fallback_paths = _string_list(
+        gate_table.get("fallback_paths", []), "[gate] fallback_paths"
+    )
+    gate_fresh_days = gate_table.get("fresh_days", 5)
+    if not isinstance(gate_fresh_days, int) or isinstance(gate_fresh_days, bool) or gate_fresh_days < 0:
+        raise ProfileError("[gate] fresh_days must be a non-negative integer")
 
     release_channels = _string_list(
         release.get("channels", []), "[release] channels"
@@ -454,17 +518,25 @@ def load(path: Path | str | None = None) -> Profile:
         docs_dir=docs_dir,
         work_dir=work_dir,
         id_format=id_format,
-        commands=dict(commands),
+        commands={key: _expand(value) for key, value in commands.items()},
         gate={level: list(steps) for level, steps in gate.items()},
         design_required_for=list(required_for),
         design_require_confirmed=require_confirmed,
+        design_risk_paths=list(design_risk_paths),
+        design_risk_exempt=list(design_risk_exempt),
+        design_risk_gate=design_risk_gate,
         required_docs=list(required_docs),
+        docs_check_links=docs_check_links,
+        docs_zero_fact=docs_zero_fact,
+        docs_decisions=docs_decisions,
         release_channels=list(release_channels),
         release_dir=release_dir,
         release_gate_level=release_gate_level,
         release_mainline=release_mainline,
         release_require_artifacts=release_require_artifacts,
         risk_paths=list(risk_paths),
+        gate_fallback_paths=list(gate_fallback_paths),
+        gate_fresh_days=gate_fresh_days,
         extensions_enabled=list(extensions_enabled),
         extensions_dir=extensions_dir,
         extension_info=extension_info,

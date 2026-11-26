@@ -48,6 +48,19 @@ def is_repo(root: Path) -> bool:
     return output == "true"
 
 
+def git_dir(root: Path) -> Path | None:
+    """The absolute git directory, or None outside a repository.
+
+    Local state (the gate ledger) lives here: inside the repository but outside
+    the working tree, so it is never a dirty path and never gets committed.
+    """
+    process = _exec(root, "rev-parse", "--absolute-git-dir")
+    if process.returncode != 0:
+        return None
+    text = process.stdout.strip()
+    return Path(text) if text else None
+
+
 def config_get(root: Path, key: str) -> str:
     """Read a git config value; empty when it is not set."""
     return _run(root, "config", "--get", key, check=False).strip()
@@ -105,7 +118,39 @@ def upstream_counts(root: Path) -> tuple[int, int] | None:
 
 
 def dirty(root: Path) -> list[str]:
-    return [line for line in _run(root, "status", "--porcelain").splitlines() if line.strip()]
+    """Porcelain lines with untracked files listed individually.
+
+    `-uall` matters for the risk gate: `?? db/` would hide which file changed.
+    """
+    return [
+        line
+        for line in _run(root, "status", "--porcelain", "-uall").splitlines()
+        if line.strip()
+    ]
+
+
+def _porcelain_path(line: str) -> str:
+    """The path part of a porcelain line, with renames resolved to the new name."""
+    entry = line[3:] if len(line) > 3 else ""
+    if " -> " in entry:
+        entry = entry.split(" -> ", 1)[1]
+    entry = entry.strip()
+    if len(entry) >= 2 and entry[0] == entry[-1] == '"':
+        entry = entry[1:-1]
+    return entry
+
+
+def worktree_paths(root: Path) -> list[str]:
+    """Paths changed in the working tree, tracked or not."""
+    return [path for path in (_porcelain_path(line) for line in dirty(root)) if path]
+
+
+def files_many(root: Path, shas: list[str]) -> list[str]:
+    """Paths touched by a set of commits, in one `git show` call."""
+    if not shas:
+        return []
+    output = _run(root, "show", "--pretty=format:", "--name-only", *shas)
+    return [line.strip() for line in output.splitlines() if line.strip()]
 
 
 def commits(root: Path, since: str | None = None, limit: int | None = None) -> list[Commit]:

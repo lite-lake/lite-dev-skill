@@ -5,6 +5,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from . import gate_log
 from .profile import Profile, ProfileError
 
 TAIL_LINES = 40
@@ -94,6 +95,8 @@ def print_results(level: str, results: list[StepResult]) -> int:
     return 1
 
 
-def run_gate(profile: Profile, level: str, timeout: int = 1800) -> int:
+def run_gate(profile: Profile, level: str, timeout: int = 1800, item: str = "") -> int:
     results = execute(profile, level, timeout=timeout)
-    return print_results(level, results)
+    code = print_results(level, results)
+    gate_log.record(profile, level, code == 0, item=item)
+    return code

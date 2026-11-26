@@ -17,7 +17,7 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.3.2,<0.4"
+requires = ">=0.3.5,<0.4"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of
@@ -33,12 +33,27 @@ format = "{date}-{type}-{time}"
 l1 = ["test"]
 l2 = ["test"]
 l3 = ["test"]
+# Paths whose change invalidates a cheap level: the gate then tells you to run
+# the strictest level. Lock files, schema run definitions, toolchain pins.
+fallback_paths = []
+# Days a recorded PASS stays fresh before `status`/`gate` advise re-running the
+# strictest level. Advisory only; nothing is blocked. 0 means always advise.
+fresh_days = 5
 
 [design]
 # Sizes that require design.md before implementation.
 required_for = ["L", "M"]
 # The human must confirm the plan before design-ready passes.
 require_confirmed = true
+# Paths that make a change structural: contracts, schema, permissions, deploy
+# scripts. `gate --work` then refuses (or warns) without a ready design.
+risk_paths = []
+# Paths that never trigger that rule, so prose about a risk path does not
+# require a design. Keep this list honest: it is the difference between a rule
+# that works and one that gets switched off.
+risk_exempt = []
+# "warn" reports a risk-path change without a design; "block" stops the gate.
+risk_gate = "warn"
 
 [commands]
 # Any shell command run from the project root. This file is executable input:
@@ -51,6 +66,16 @@ test = "echo 'replace me with your real test command'"
 [docs]
 # These must exist; check reports missing ones as errors.
 required = ["README.md", "AGENTS.md", "docs/README.md"]
+# Relative links under docs_dir must resolve; every file in an indexed
+# directory must be linked from its README; every item artifact must be
+# mentioned in item.md; a release record must not repeat a heading.
+check_links = true
+# Entry documents (README/AGENTS) may not pin versions, ports, or dates: each is
+# a fact with a single authority somewhere else.
+zero_fact = true
+# Optional home for decision records: one file per decision, indexed by its
+# README.md (see templates/decision.md). Empty disables the check.
+decisions = ""
 
 [release]
 # Channels you record releases for. Empty means `flow.py release` is unavailable.

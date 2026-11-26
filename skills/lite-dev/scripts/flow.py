@@ -9,6 +9,9 @@ Usage (from the project root):
     python3 <skill>/scripts/flow.py gate --level l1 [--work <ID>]
     python3 <skill>/scripts/flow.py claim <ID>
     python3 <skill>/scripts/flow.py done <ID>
+    python3 <skill>/scripts/flow.py handoff <ID> [--batch <Bx>]
+    python3 <skill>/scripts/flow.py archive <ID> [--reason "..."]
+    python3 <skill>/scripts/flow.py unarchive <ID>
     python3 <skill>/scripts/flow.py whoami
     python3 <skill>/scripts/flow.py release --channel staging
     python3 <skill>/scripts/flow.py reconcile
@@ -34,11 +37,14 @@ sys.path.insert(0, str(SCRIPTS))
 
 from flowlib import (  # noqa: E402
     __version__,
+    archive,
     artifacts,
     checks,
     commands,
     fsio,
+    gate_log,
     git,
+    handoff,
     identity,
     reconcile,
     release,
@@ -223,6 +229,8 @@ def cmd_status(args) -> int:
         counts[item.status] = counts.get(item.status, 0) + 1
     checkout = _checkout(profile)
     items.sort(key=lambda item: (STATUS_ORDER.get(item.status, 9), item.id))
+    full = profile.full_level
+    stale = gate_log.stale_line(profile, full) if full else None
 
     if args.json:
         print(
@@ -232,6 +240,7 @@ def cmd_status(args) -> int:
                     "profile": str(profile.path.relative_to(profile.root)),
                     "checkout": checkout,
                     "mine": mine or None,
+                    "gate": {"full": full, "stale": stale},
                     "items": [
                         {
                             "id": item.id,
@@ -274,6 +283,11 @@ def cmd_status(args) -> int:
 
     if not items:
         print("  no work items" if not mine else f"  no items for {mine}")
+        archived = len(artifacts.archived_items(profile))
+        if archived:
+            print(f"{archived} archived (flow.py archive --help)")
+        if stale:
+            print(f"\nwarn: {stale}")
         return 0
 
     rows = []
@@ -302,6 +316,11 @@ def cmd_status(args) -> int:
         counts[item.status] = counts.get(item.status, 0) + 1
     summary = ", ".join(f"{key} {counts[key]}" for key in STATUS_ORDER if key in counts)
     print(f"\n{len(items)} item(s): {summary}")
+    archived = len(artifacts.archived_items(profile))
+    if archived:
+        print(f"{archived} archived (flow.py archive --help)")
+    if stale:
+        print(f"\nwarn: {stale}")
 
     next_lines = []
     for item in items:
@@ -370,6 +389,25 @@ def cmd_design_ready(args) -> int:
 def cmd_gate(args) -> int:
     profile = _load_profile(args)
     errors, warnings = checks.check_project(profile, work=args.work)
+    item = None
+    changed: list[str] = []
+    if args.work:
+        item = artifacts.find_item(profile, args.work)
+    try:
+        changed = (
+            checks.changed_paths(profile, item)
+            if item is not None
+            else git.worktree_paths(profile.root)
+        )
+    except git.GitError:
+        changed = []
+
+    if item is not None:
+        risk_errors, risk_warnings = checks.risk_gate(item, profile, changed)
+        errors.extend(risk_errors)
+        warnings.extend(risk_warnings)
+    warnings.extend(checks.fallback_warnings(profile, args.level, changed))
+
     if errors:
         print("FAIL: static checks must pass before the gate runs")
         _print_issues(errors, warnings)
@@ -377,8 +415,7 @@ def cmd_gate(args) -> int:
     for warning in warnings:
         print(f"warn: {warning}")
 
-    if args.work:
-        item = artifacts.find_item(profile, args.work)
+    if item is not None:
         if item.size in profile.design_required_for and item.design_status != "ready":
             print(
                 f"FAIL: {item.id} is size {item.size} and needs a ready design "
@@ -386,8 +423,19 @@ def cmd_gate(args) -> int:
             )
             return 1
 
+    full = profile.full_level
+    if full and full != args.level:
+        stale = gate_log.stale_line(profile, full)
+        if stale:
+            print(f"warn: {stale}")
+
     try:
-        return commands.run_gate(profile, args.level, timeout=args.timeout)
+        return commands.run_gate(
+            profile,
+            args.level,
+            timeout=args.timeout,
+            item=args.work or "",
+        )
     except ProfileError as exc:
         print(f"error: {exc}")
         return 2
@@ -619,6 +667,7 @@ def cmd_release(args) -> int:
     if commands.print_results(profile.release_gate_level, results) != 0:
         print("FAIL: release not recorded")
         return 1
+    gate_log.record(profile, profile.release_gate_level, True, item="release")
 
     record = release.render(
         channel=channel,
@@ -690,6 +739,35 @@ def cmd_reconcile(args) -> int:
         print(json.dumps(reconcile.as_dict(debt), ensure_ascii=False, indent=2))
         return 0
     print(reconcile.render(debt, root=profile.root, verbose=args.verbose))
+    return 0
+
+
+def cmd_handoff(args) -> int:
+    profile = _load_profile(args)
+    item = artifacts.find_item(profile, args.id)
+    if args.batch and not item.design_path:
+        raise FlowError(
+            f"{item.id} has no design.md; drop --batch and hand off the item instead"
+        )
+    print(handoff.render(profile, item, batch=args.batch))
+    return 0
+
+
+def cmd_archive(args) -> int:
+    profile = _load_profile(args)
+    target = archive.archive(profile, args.id, reason=args.reason or "", force=args.force)
+    print(f"archived {args.id}")
+    print(f"  {target.relative_to(profile.root)}")
+    print(f"  index: {archive.index_path(profile).relative_to(profile.root)}")
+    print("next: commit the move so the next session sees the same working set")
+    return 0
+
+
+def cmd_unarchive(args) -> int:
+    profile = _load_profile(args)
+    target = archive.restore(profile, args.id)
+    print(f"restored {args.id}")
+    print(f"  {target.relative_to(profile.root)}")
     return 0
 
 
@@ -813,6 +891,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common(extensions_parser)
     extensions_parser.set_defaults(func=cmd_extensions)
+
+    handoff_parser = subparsers.add_parser(
+        "handoff", help="print a cold-start prompt for a fresh session"
+    )
+    add_common(handoff_parser)
+    handoff_parser.add_argument("id")
+    handoff_parser.add_argument(
+        "--batch", help="print the implement dispatch for one batch instead"
+    )
+    handoff_parser.set_defaults(func=cmd_handoff)
+
+    archive_parser = subparsers.add_parser(
+        "archive", help="move a closed item out of the working set"
+    )
+    add_common(archive_parser)
+    archive_parser.add_argument("id")
+    archive_parser.add_argument("--reason", help="why it was archived (recorded in the index)")
+    archive_parser.add_argument(
+        "--force", action="store_true", help="archive an item that is not closed"
+    )
+    archive_parser.set_defaults(func=cmd_archive)
+
+    unarchive_parser = subparsers.add_parser(
+        "unarchive", help="move an archived item back into the working set"
+    )
+    add_common(unarchive_parser)
+    unarchive_parser.add_argument("id")
+    unarchive_parser.set_defaults(func=cmd_unarchive)
 
     return parser
 

@@ -1,0 +1,10 @@
+name = "security-scan"
+version = "1.0.0"
+description = "Fail when a git-tracked file looks like a committed credential."
+requires = ">=0.3.5,<0.4"
+
+[commands]
+security_scan = "python3 {skill}/extensions/security-scan/scan.py"
+
+[gate]
+l3 = ["security_scan"]

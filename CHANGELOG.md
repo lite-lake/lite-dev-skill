@@ -2,6 +2,78 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.3.5 — 2026-11-26
+
+The parts of the flow that were specified but left to people become checks: the
+handoff prompt is assembled instead of retyped, `check` now reads the documents
+it used to trust, a risk path without a design is visible, and a stale full gate
+says so. Two optional extensions cover credentials and deployment manifests.
+
+### Added
+
+- `handoff <ID> [--batch <Bx>]` prints a cold-start prompt built from the
+  artifacts: item and design paths, the design's handoff summary verbatim, batch
+  progress from `## Implementation`, the next batch, and the gate command.
+  `--batch` prints the implement dispatch for one batch. Instructions are written
+  in `project.language`; the data is never paraphrased.
+- `archive <ID> [--reason …]` and `unarchive <ID>`: a closed item moves to
+  `<work_dir>/_archive/<YYYY-MM>/` and one row is appended to that directory's
+  `README.md`. Nothing is deleted; an archived id still resolves but is not part
+  of `status`.
+- `check` now validates documents, not only artifacts:
+  - relative links under `docs_dir` resolve (fenced blocks and inline code are
+    skipped, template tokens are ignored);
+  - every markdown file in an indexed directory is linked from that directory's
+    `README.md`;
+  - every artifact file inside an item directory is mentioned by its `item.md`;
+  - a release record repeats no `##` heading;
+  - no live document links into `_archive/`;
+  - entry documents (`README`, `AGENTS`) pin no version, port, or date;
+  - `[docs] decisions`, when set, exists and has an index.
+- `[design] risk_paths`, `risk_exempt`, `risk_gate`: `gate --work` reports (or,
+  with `"block"`, refuses) a change under a risk path that has no ready design.
+  The exemption list is what keeps prose about a risk path from tripping it.
+- `[gate] fallback_paths`: changing a listed path (lock files, schema runs,
+  toolchain pins) invalidates a cheap level; the gate says to run the strictest.
+- `[gate] fresh_days` and a per-clone gate ledger in `<git-dir>/lite-dev/`:
+  `status` and a cheaper level report when the strictest level's last PASS is
+  stale. Advisory only; the ledger is never a working-tree file.
+- Extension commands may contain `{skill}`; the loader expands it to the
+  installed skill directory (shell-quoted), so a bundled extension can ship a
+  script without hardcoding a machine path.
+- Bundled `security-scan`: fails the gate on tracked credentials, sensitive file
+  names, or credentialed URLs, with a path-prefix allowlist.
+- Bundled `deploy-lane`: validates deployment manifests — required fields,
+  backfilled values, RFC3339 time, commit shas, immutable tags and `sha256:`
+  digests, and a rollback target that is never blank.
+- `templates/decision.md` and `[docs] decisions` for records that outlive a
+  work item.
+- `references/docs-hygiene.md`.
+
+### Changed
+
+- `check` can now fail where it used to pass: a broken relative link, a repeated
+  heading in a release record, or a missing decisions index is an error. Run
+  `check` once after upgrading; the warnings name the file and the fix.
+- `status` adds a gate-freshness line, an archived count, and `gate` in
+  `--json`. Existing consumers of the text output are unaffected; script
+  consumers that parse strictly should read the new field.
+- `gate` records each run in the per-clone ledger and prints the fallback and
+  risk-path advisories before running the commands.
+- `done` is unchanged, but `find_item` now resolves archived ids as well; a
+  duplicate between the working set and the archive is still reported by `check`.
+- The profile template pins `[flow] requires = ">=0.3.5,<0.4"`. A project on
+  `>=0.3.2,<0.4` needs no change and picks all of the above up; the new keys are
+  simply unavailable on older installs.
+- The extension schema was **not** widened beyond `{skill}`. Deployment records
+  are covered by the release record plus the document checks, so `[templates]`
+  and `[artifacts]` stay out until something real needs them.
+
+### Fixed
+
+- `git status --porcelain -uall` is used for changed paths, so the risk gate sees
+  `db/schema.sql` instead of the collapsed `db/`, and an exemption can match.
+
 ## 0.3.4 — 2026-11-26
 
 Working with other people and on more than one machine: identity drift becomes

@@ -20,6 +20,6 @@ Rules:
   change the state machine. Collisions and unknown keys are errors.
 - `requires` is mandatory; the loader refuses an incompatible lite-dev version.
 
-A framework such as litecore-go can publish its own extension in the same shape;
-keep it in the framework repository and copy it to `docs/flow/extensions/<name>/`,
-or ship it next to the skill.
+A framework can publish its own extension in the same shape: keep it in the
+framework repository and copy it to `docs/flow/extensions/<name>/`, or ship it
+next to the skill.
