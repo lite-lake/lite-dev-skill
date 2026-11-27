@@ -165,9 +165,15 @@ batch: B2
             large, "every write emits an audit line", "the audit log is queryable"
         )
 
-        design = (SKILL / "templates/design.md").read_text(encoding="utf-8")
+        design_cmd = self.run_flow("design", large_id)
+        self.assertEqual(design_cmd.returncode, 0, design_cmd.stdout + design_cmd.stderr)
+        design = (large / "design.md").read_text(encoding="utf-8")
+        # The scaffold carries every section the parser requires, so a project
+        # that only fills the plan never discovers a heading by failing.
+        self.assertIn("## Decision Defaults", design)
+        self.assertIn("| Batch | Goal | Repo | AC | Depends | Parallel |", design)
+        self.assertNotIn("item: <ID>", design)
         replacements = {
-            "<ID>": large_id,
             "- Goal:": "- Goal: add an audit log",
             "- Scope:": "- Scope: one module",
             "- Out:": "- Out: no retention policy",
@@ -175,8 +181,8 @@ batch: B2
             "- Rollback:": "- Rollback: revert the commit",
             "- Confirmed: no": "- Confirmed: yes",
             "- Date:": f"- Date: {TODAY}",
-            "| B1 | | . | AC01 | — |": "| B1 | write store | . | AC01 | — |",
-            "| B2 | | . | AC02 | — |": "| B2 | read API | . | AC02 | B1 |",
+            "| B1 | | . | AC01 | — | — |": "| B1 | write store | . | AC01 | — | — |",
+            "| B2 | | . | AC02 | B1 | — |": "| B2 | read API | . | AC02 | B1 | — |",
             "| AC01 | | | |": "| AC01 | unit test | local | output |\n| AC02 | unit test | local | output |",
             "<components and data flow, or the key user journey: current -> changed>":
                 "writer -> store -> reader",

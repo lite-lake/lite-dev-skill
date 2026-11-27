@@ -1,7 +1,7 @@
 name = "deploy-lane"
 version = "1.0.0"
 description = "Deployment manifests: complete, backfilled, and pinned to immutable images."
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [commands]
 deploy_check = "python3 {skill}/extensions/deploy-lane/deploy_check.py"

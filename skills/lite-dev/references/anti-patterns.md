@@ -44,3 +44,13 @@ not more effort.
 12. **Sleeping on a build.** A fixed sleep pulls the old image or reads a stale
     report. Fix: poll the timestamp or the status, with a bound, and stop when
     the bound expires.
+
+13. **Stopping on trivia.** Execution halts for a status code, a field name, or a
+    button label, and the item waits for a human who already approved the plan.
+    Fix: `## Decision Defaults` agreed in Phase A; take the smallest default,
+    record the deviation, continue.
+
+14. **Ceremony on an M.** A tooling or process change is promoted to two phases
+    because it feels structural. Fix: the four signals are L, over five
+    person-days, schema/permissions/new module, multi-batch. An M is one session
+    even when the change is to the flow itself.

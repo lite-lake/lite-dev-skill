@@ -9,8 +9,11 @@ verifies. How you get them depends on the harness.
 - Pass only ids and paths; the subagent reads the artifacts.
 - This is the intended mode: it prevents the implementer's assumptions from
   leaking into verification.
-- A subagent that returns nothing gets one retry with the same task. A second
-  empty return stops the batch and asks; do not reinterpret silence as success.
+- A subagent that returns nothing gets one retry with the same task, including
+  when it fails for transport reasons; check that the tree holds no half-done
+  work before resending, and pass the paths of what it already produced so the
+  retry does not start from zero. A second empty return stops the batch and asks;
+  do not reinterpret silence as success.
 
 ## Mode B: single context only
 

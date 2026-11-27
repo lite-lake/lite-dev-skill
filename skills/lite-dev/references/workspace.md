@@ -75,6 +75,33 @@ the level says it did not inspect it. `check` reports the same set once, and
 only the repositories you expect here are reported. Missing output is loud;
 empty output is not evidence.
 
+## Parallel batches
+
+Parallelism is a property of the batch table, not of a session: a batch names a
+`Parallel` group, and members run at the same time only when their repositories
+are disjoint.
+
+| Batch | Repo | Parallel |
+|---|---|---|
+| B1 | svc-a | P1 |
+| B2 | svc-b | P1 |
+
+`design-ready` refuses a group whose members share a repository, a grouped batch
+that names none, and a dependency between two members. The reasons are
+mechanical: implementers share one worktree per repository, and a dependency is
+a serial order by definition. With one repository every batch shares `.`, so the
+column is `—`.
+
+The gate is already scoped per repository, so each member runs its own level
+against its own repository and `handoff --batch <Bx>` hands it that scope. The
+control repository is the shared part — items and evidence live there — so the
+orchestrator writes `implementation.md` after a group returns instead of letting
+concurrent implementers append to it.
+
+Front-load the cross-repository batch: a contract batch that changes two
+repositories serialises everything that waits on it, and a later batch that
+touches two repositories deletes its own parallelism.
+
 ## Change detection spans repositories
 
 `changed_paths` visits every declared repository and prefixes each path with its

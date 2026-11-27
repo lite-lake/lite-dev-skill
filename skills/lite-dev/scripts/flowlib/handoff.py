@@ -36,6 +36,8 @@ INSTRUCTIONS = {
         "rule_no_redesign": "- Do not redesign; the plan is confirmed{when}.",
         "rule_unconfirmed": "- design.md is not ready or not confirmed: return to Phase A and run design-ready.",
         "rule_batches": "- Dispatch every unfinished batch in order. A finished batch is not a stop condition.",
+        "rule_accept": "- An AC is accepted black-box once, in the first batch that names it. A later batch runs regression only.",
+        "rule_parallel": "- Batches in one parallel group with disjoint repositories may be dispatched together; one repository is always serial.",
         "rule_commit": "- Only the commit role commits. Update `## Implementation` after each batch.",
         "rule_stop": "- Stop on the conditions in SKILL.md section 9, then update progress first.",
         "gate": "Gate: {command}",
@@ -43,10 +45,13 @@ INSTRUCTIONS = {
         "warnings": "Warnings:",
         "batch_intro": "You are the implement role for work item {id}, batch {batch}.",
         "batch_row": "Batch {batch}: {goal}; repo {repo}; covers {ac}; depends on {depends}.",
+        "batch_parallel": "Parallel group {group}: this batch may be dispatched together with the other members; they change the other repositories.",
+        "batch_accept": "Acceptance for this batch: {accept}.",
+        "batch_regression": "Also covered here, already accepted in {batch}: {ac}. Run regression only; do not accept it twice.",
         "batch_rules": "Rules:",
         "batch_rule_scope": "- Do only this batch. Do not start the next one, do not refactor along the way.",
         "batch_rule_commit": "- Do not commit, do not push, do not edit design.md, do not relax tests.",
-        "batch_rule_gap": "- A gap in the design is a stop: report it instead of inventing a contract, state, or error code.",
+        "batch_rule_gap": "- A gap in scope, a contract, the data model, or a security semantic is a stop: report it instead of inventing one. An implementation detail takes `## Decision Defaults` and is recorded as a deviation.",
         "batch_return": "Return at most 30 lines: what changed, gate result, deviations, open questions.",
         "done": "done",
         "doing": "doing",
@@ -71,6 +76,8 @@ INSTRUCTIONS = {
         "rule_no_redesign": "- 不要重新设计；方案已于{when}确认。",
         "rule_unconfirmed": "- design.md 尚未 ready 或未确认：回到 Phase A，跑 design-ready。",
         "rule_batches": "- 按顺序派发每一个未完成批次。完成一个批次不是停止条件。",
+        "rule_accept": "- 每条 AC 只在第一个列出它的批次做一次黑盒验收；后续批次只跑回归。",
+        "rule_parallel": "- 同一并行组且仓库互不相交的批次可一次派发；同一个仓库一律串行。",
         "rule_commit": "- 只有提交角色提交。每批完成后更新 `## Implementation`。",
         "rule_stop": "- 触发 SKILL.md 第 9 节的停止条件就停下，并先更新进度。",
         "gate": "门禁：{command}",
@@ -78,10 +85,13 @@ INSTRUCTIONS = {
         "warnings": "警告：",
         "batch_intro": "你是工作项 {id} 批次 {batch} 的 implement 角色。",
         "batch_row": "批次 {batch}：{goal}；仓库 {repo}；覆盖 {ac}；依赖 {depends}。",
+        "batch_parallel": "并行组 {group}：本批可与同组其他批次一起派发；它们改的是别的仓库。",
+        "batch_accept": "本批验收：{accept}。",
+        "batch_regression": "同批覆盖、但已在 {batch} 验收：{ac}。只跑回归，不重复验收。",
         "batch_rules": "规则：",
         "batch_rule_scope": "- 只做本批。不提前做下一批，不顺手重构。",
         "batch_rule_commit": "- 不 commit、不 push、不改 design.md、不降低测试标准。",
-        "batch_rule_gap": "- 设计有缺口就停：报告缺口，不自行发明契约、状态或错误码。",
+        "batch_rule_gap": "- 范围、契约、数据模型或安全语义的缺口就停：报告缺口，不自行发明。实现细节按 `## Decision Defaults` 取最小解并记为偏差。",
         "batch_return": "返回不超过 30 行：改了什么、门禁结果、偏差、待决问题。",
         "done": "完成",
         "doing": "进行中",
@@ -132,6 +142,13 @@ def next_batch(item: artifacts.Item) -> str | None:
         if batch_state(item, batch_id) != "done":
             return batch_id
     return None
+
+
+def _has_parallel_group(item: artifacts.Item) -> bool:
+    return any(
+        artifacts.row_value(row, "Parallel", "并行组").strip() not in {"", "-", "—"}
+        for row in item.batches
+    )
 
 
 def _row(item: artifacts.Item, batch_id: str) -> dict[str, str]:
@@ -208,6 +225,20 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
                 depends=_field(row, "Depends", "依赖"),
             )
         )
+        group = _field(row, "Parallel", "并行组", default="")
+        if group:
+            lines.append(words["batch_parallel"].format(group=group))
+        # Which ACs this batch accepts is derived from the batch table, so a
+        # verifier is never asked to accept the same outcome twice.
+        covers = checks.AC_ID_RE.findall(artifacts.row_value(row, "AC", "覆盖 AC", "覆盖AC"))
+        accepting = checks.acceptance_batches(item)
+        accept = sorted(ac_id for ac_id in covers if accepting.get(ac_id) == batch)
+        if accept:
+            lines.append(words["batch_accept"].format(accept=", ".join(accept)))
+        for ac_id in sorted(covers):
+            owner = accepting.get(ac_id)
+            if owner and owner != batch:
+                lines.append(words["batch_regression"].format(batch=owner, ac=ac_id))
         # A batch that names a repository gets a gate command for that repository:
         # the implement role should not have to rediscover the scope, and `l1`
         # stays cheap when the batch is one repository of several.
@@ -317,7 +348,11 @@ def render(profile: Profile, item: artifacts.Item, batch: str | None = None) -> 
             lines.append(words["rule_unconfirmed"])
         else:
             lines.append(words["rule_no_redesign"].format(when=when))
-        for key in ("rule_batches", "rule_commit", "rule_stop"):
+        for key in ("rule_batches", "rule_accept"):
+            lines.append(words[key])
+        if _has_parallel_group(item):
+            lines.append(words["rule_parallel"])
+        for key in ("rule_commit", "rule_stop"):
             lines.append(words[key])
     lines.append("")
     lines.append(words["gate"].format(command=gate))

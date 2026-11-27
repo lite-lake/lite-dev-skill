@@ -23,7 +23,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 format = "{{date}}-{{type}}-{{time}}"
@@ -119,6 +119,12 @@ Add an exporter.
 | AC01 | unit | local | output |
 | AC02 | unit | local | output |
 
+## Decision Defaults
+
+| Situation | Default |
+|---|---|
+| A column order is not written down | Follow the existing exporter |
+
 ## Rollback
 
 Revert the commit.
@@ -174,6 +180,35 @@ class HandoffTest(unittest.TestCase):
         self.assertIn("Batch B2: route; repo .; covers AC02; depends on B1.", output)
         self.assertIn("Do not commit", output)
         self.assertIn("Return at most 30 lines", output)
+
+    def test_batch_dispatch_names_acceptance_and_the_parallel_group(self) -> None:
+        self.write_parallel_design()
+        code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B2")
+        self.assertEqual(code, 0, output)
+        self.assertIn("Parallel group P1", output)
+        self.assertIn("Acceptance for this batch: AC02", output)
+        self.assertIn("already accepted in B1: AC01", output)
+
+    def test_orchestrator_prompt_allows_a_disjoint_group_to_run_together(self) -> None:
+        self.write_parallel_design()
+        code, output = self.run_flow("handoff", ITEM_ID)
+        self.assertEqual(code, 0, output)
+        self.assertIn("may be dispatched together", output)
+        self.assertIn("accepted black-box once", output)
+
+    def write_parallel_design(self) -> None:
+        path = self.directory / "design.md"
+        text = path.read_text(encoding="utf-8").replace(
+            "| Batch | Goal | Repo | AC | Depends |\n"
+            "|---|---|---|---|---|\n"
+            "| B1 | exporter | . | AC01 | — |\n"
+            "| B2 | route | . | AC02 | B1 |",
+            "| Batch | Goal | Repo | AC | Depends | Parallel |\n"
+            "|---|---|---|---|---|---|\n"
+            "| B1 | exporter | svc-a | AC01 | — | P1 |\n"
+            "| B2 | route | svc-b | AC01, AC02 | — | P1 |",
+        )
+        path.write_text(text, encoding="utf-8")
 
     def test_unknown_batch_lists_the_defined_ones(self) -> None:
         code, output = self.run_flow("handoff", ITEM_ID, "--batch", "B9")

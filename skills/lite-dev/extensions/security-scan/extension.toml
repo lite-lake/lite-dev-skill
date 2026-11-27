@@ -1,7 +1,7 @@
 name = "security-scan"
 version = "1.0.0"
 description = "Fail when a file that could be committed looks like a credential."
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [commands]
 security_scan = "python3 {skill}/extensions/security-scan/scan.py"

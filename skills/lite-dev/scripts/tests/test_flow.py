@@ -27,7 +27,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -127,9 +127,9 @@ Add the handler and one test.
 
 ## Batches
 
-| Batch | Goal | Repo | AC | Depends |
-|---|---|---|---|---|
-| B1 | add handler | . | {ac_cell} | — |
+| Batch | Goal | Repo | AC | Depends | Parallel |
+|---|---|---|---|---|---|
+| B1 | add handler | . | {ac_cell} | — | — |
 
 ## Impact
 
@@ -142,6 +142,13 @@ Add the handler and one test.
 | AC | Command | Environment | Evidence |
 |---|---|---|---|
 | AC01 | python3 -m unittest | local | test output |
+| AC02 | python3 -m unittest | local | test output |
+
+## Decision Defaults
+
+| Situation | Default |
+|---|---|
+| A field name is not written down | Follow the existing store |
 
 ## Rollback
 
@@ -325,7 +332,7 @@ class ProfileTest(BaseCase):
     def test_flow_requires_pins_the_version(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('requires = ">=0.5.0,<0.6"', 'requires = ">=9,<10"'),
+            PROFILE.replace('requires = ">=0.6.0,<0.7"', 'requires = ">=9,<10"'),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -334,7 +341,7 @@ class ProfileTest(BaseCase):
     def test_flow_table_is_required(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('[flow]\nrequires = ">=0.5.0,<0.6"\n\n', ""),
+            PROFILE.replace('[flow]\nrequires = ">=0.6.0,<0.7"\n\n', ""),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -757,6 +764,102 @@ class DesignTest(BaseCase):
         item = self.write_design(text=text)
         errors = checks.design_errors(item, self.profile)
         self.assertTrue(any("B1..Bn in order" in error for error in errors), errors)
+
+    def test_decision_defaults_need_a_confirmed_row(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| A field name is not written down | Follow the existing store |",
+            "| | |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("Decision Defaults needs at least one" in error for error in errors), errors
+        )
+
+    def test_translated_decision_defaults_heading_is_named(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "## Decision Defaults", "## 裁决默认值"
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any(
+                "the parsed heading must stay '## Decision Defaults'" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_parallel_group_may_not_share_a_repository(self) -> None:
+        self.make_item(ac="- [ ] AC01 works\n- [ ] AC02 also works")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | . | AC01 | — | P1 |\n| B2 | two | . | AC02 | — | P1 |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("both change ." in error for error in errors), errors
+        )
+
+    def test_parallel_group_member_must_name_a_repository(self) -> None:
+        self.make_item(ac="- [ ] AC01 works\n- [ ] AC02 also works")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | — | AC01 | — | P1 |\n| B2 | two | svc-b | AC02 | — | P1 |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("names no repository" in error for error in errors), errors
+        )
+
+    def test_parallel_group_member_may_not_depend_on_its_group(self) -> None:
+        self.make_item(ac="- [ ] AC01 works\n- [ ] AC02 also works")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | svc-a | AC01 | — | P1 |\n| B2 | two | svc-b | AC02 | B1 | P1 |",
+        )
+        item = self.write_design(text=text)
+        errors = checks.design_errors(item, self.profile)
+        self.assertTrue(
+            any("a dependency is serial" in error for error in errors), errors
+        )
+
+    def test_parallel_group_with_disjoint_repositories_passes(self) -> None:
+        self.make_item(ac="- [ ] AC01 works\n- [ ] AC02 also works")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | svc-a | AC01 | — | P1 |\n| B2 | two | svc-b | AC02 | — | P1 |",
+        )
+        item = self.write_design(text=text)
+        self.assertEqual(checks.design_errors(item, self.profile), [])
+
+    def test_acceptance_belongs_to_the_first_batch_that_names_the_ac(self) -> None:
+        self.make_item(ac="- [ ] AC01 works\n- [ ] AC02 also works")
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| B1 | add handler | . | AC01 | — |",
+            "| B1 | one | . | AC01 | — |\n| B2 | two | . | AC01, AC02 | B1 |",
+        )
+        item = self.write_design(text=text)
+        self.assertEqual(
+            checks.acceptance_batches(item), {"AC01": "B1", "AC02": "B2"}
+        )
+
+    def test_batch_table_without_a_parallel_column_still_passes(self) -> None:
+        self.make_item()
+        text = DESIGN.format(ac_cell="AC01", item_id=ITEM_ID).replace(
+            "| Batch | Goal | Repo | AC | Depends | Parallel |\n"
+            "|---|---|---|---|---|---|\n"
+            "| B1 | add handler | . | AC01 | — | — |",
+            "| Batch | Goal | Repo | AC | Depends |\n"
+            "|---|---|---|---|---|\n"
+            "| B1 | add handler | . | AC01 | — |",
+        )
+        item = self.write_design(text=text)
+        self.assertEqual(checks.design_errors(item, self.profile), [])
 
 
 class DesignCommandTest(BaseCase):

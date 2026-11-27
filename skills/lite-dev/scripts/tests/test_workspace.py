@@ -34,7 +34,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -246,7 +246,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -566,6 +566,12 @@ Use the prefix from svc-a.
 |---|---|---|---|
 | AC01 | unit | - | test-report |
 | AC02 | unit | - | test-report |
+
+## Decision Defaults
+
+| Situation | Default |
+|---|---|
+| The prefix format is not written down | Follow the existing label |
 
 ## Rollback
 

@@ -23,8 +23,8 @@ request
   -> clarify (<=5 questions, once)
   -> work item (item.md, AC)
   -> design (when profile.required_for or risk_paths says so; M by default)
-  -> batches (B1..Bn, ordered, every AC covered)
-  -> implement -> verify (append evidence) -> commit, per batch
+  -> batches (B1..Bn, ordered, every AC covered; a disjoint group may run at once)
+  -> implement -> verify (each AC accepted once, evidence appended) -> commit, per batch
   -> gate (the project's own commands, not ours)
   -> release record (optional channel)
   -> done (AC checked, evidence, gate PASS, identity)
@@ -173,9 +173,9 @@ examples/workspace/         a working workspace: one root, two repositories
 | time-ordered id allocation, directory scaffold | clarifying questions, trade-offs |
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
-| required fields, links, AC↔batch↔verification | code and tests |
+| required fields, links, AC↔batch↔verification, which batch accepts each AC | code and tests |
 | evidence completeness for every item (one command and output per AC, verdict) | whether the evidence is sufficient |
-| design gate (confirmation, rollback, gaps, ordered batch graph) | failure diagnosis |
+| design gate (confirmation, decision defaults, rollback, gaps, ordered batch graph, parallel-group disjointness) | failure diagnosis |
 | running profile commands, exit codes, recorded full-level PASS | black-box acceptance judgement |
 | release chain ordered by commit ancestry; bookkeeping vs debt | deployment judgement |
 | handoff prompt assembled from the artifacts | the judgement behind the next step |

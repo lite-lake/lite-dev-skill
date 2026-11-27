@@ -1,3 +1,3 @@
 """lite-dev flow library. All project facts come from docs/flow/profile.toml."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

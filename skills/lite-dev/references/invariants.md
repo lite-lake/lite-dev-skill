@@ -66,12 +66,17 @@ that teaches people to ignore the file.
   empty cell, a TODO-style placeholder, or no row at all is not evidence.
   Angle-bracket text in a real command or output (`<skill>`, `<nil>`, `<br>`)
   is evidence, not a placeholder.
+- An AC is accepted once, black-box, in the first batch that names it. A later
+  batch that still covers it runs regression for what its change touches; it
+  accepts the outcome a second time never, and treats it as unverified never.
 - When the harness has no subagents, the weaker mode is declared, not hidden.
   For a one-shot item with no `implementation.md`, declare it in `## Notes`.
 - **Enforced**: `done` refuses any item without `test-report.md`, without
   `Verdict: PASS`, with an AC that has no evidence row, without a recorded
   full-level gate PASS, or without an identity. While the item is open, `check`
   reports a partial or failing report as a warning so iterating is not blocked.
+  `handoff --batch` derives the accepting batch from `## Batches` and names the
+  ACs that are acceptance here and the ACs that are regression only.
   Whether the evidence is *sufficient* is still human.
 
 ## 6. Every batch is planned before the first one
@@ -80,11 +85,18 @@ that teaches people to ignore the file.
 - Every AC appears in at least one batch.
 - A dependency names an earlier batch; no forward edge, cycle, or self-dependency.
 - Contracts and data model first; backend before frontend.
+- A batch is a slice of observable outcome, not a technical layer; a batch that
+  produces nothing observable is merged into its neighbour. A contract or schema
+  batch is the exception — everything waits on it, so it goes first alone.
+- A batch may name a parallel group. Batches in one group run concurrently, so
+  they must name disjoint repositories and no member may depend on another member.
+  One worktree has one writer.
 - After each batch the main branch builds and passes the gate.
 - **Enforced**: `design-ready` validates contiguous ordered batch ids, AC
-  coverage, dependency existence and direction, and cycles. `handoff` refuses a
-  done batch, a batch whose dependency is not done, and names a blocked batch
-  instead of dispatching it.
+  coverage, dependency existence and direction, and cycles; it refuses a group
+  whose members share a repository, a grouped batch that names no repository, and
+  a dependency inside one group. `handoff` refuses a done batch, a batch whose
+  dependency is not done, and names a blocked batch instead of dispatching it.
 
 ## 7. Work is never half-done on main
 
@@ -165,11 +177,24 @@ that teaches people to ignore the file.
 
 ## 11. Stop conditions outrank progress
 
-- Unclear requirement, unconfirmed plan, irreversible action without rollback,
+- Unclear requirement, unconfirmed plan, a change to scope, contracts, the data
+  model, or a security semantic, an irreversible action without rollback, a
   destructive schema change, gate failing three times, batch failing verification
   twice, scope growth, context exhaustion → stop and ask.
+- An implementation detail the design leaves open is not a stop: take the
+  smallest default in the design's `## Decision Defaults`, record the deviation
+  with the default it took, and continue. A contract, a state, or an error code
+  is never invented, and the batch never widens.
+- A missing environment is recorded as a blockage, never faked, mocked into the
+  product, or worked around in code; the batches that do not need it continue,
+  and only a blockage of every remaining batch stops the work. A subagent that
+  fails for transport reasons is retried once, not escalated.
 - Batch completion is not a stop condition.
-- **Enforced**: human; the skill states the list where it is always loaded.
+- **Enforced**: `design-ready` requires a non-empty `## Decision Defaults`, so
+  the defaults are agreed while the human is present instead of invented during
+  execution; the triage is stated where it is always loaded (SKILL.md section 9).
+  Whether a given gap is a contract change is still human, and that is the named
+  debt of this invariant.
 
 ## 12. Irreversible actions require a rollback
 

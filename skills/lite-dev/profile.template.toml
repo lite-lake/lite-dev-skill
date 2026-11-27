@@ -43,7 +43,7 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of

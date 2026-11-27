@@ -17,6 +17,7 @@ DESIGN_SECTIONS = (
     "Batches",
     "Impact",
     "Verification",
+    "Decision Defaults",
     "Rollback",
 )
 # Headings are a parsing contract: translate the prose, not the heading. These
@@ -30,6 +31,7 @@ DESIGN_SECTION_ALIASES = {
     "Batches": ("实施批次",),
     "Impact": ("影响",),
     "Verification": ("怎么验",),
+    "Decision Defaults": ("裁决默认值", "默认裁决"),
     "Rollback": ("怎么回滚",),
 }
 HANDOFF_LABELS = (
@@ -127,6 +129,8 @@ def design_errors(item: artifacts.Item, profile: Profile) -> list[str]:
         if ac_id not in verification:
             errors.append(f"{ac_id} is not referenced in ## Verification")
 
+    errors.extend(_decision_errors(item))
+
     rollback = artifacts.section(item.design_body, "Rollback", "怎么回滚") or ""
     if not rollback.strip() or PLACEHOLDER_WORDS.search(rollback):
         errors.append("## Rollback must describe a real rollback (not empty, not TBD)")
@@ -136,6 +140,56 @@ def design_errors(item: artifacts.Item, profile: Profile) -> list[str]:
         errors.append("## Open Decisions must be empty (or 'None') before implementation")
 
     return errors
+
+
+DECISION_DEFAULTS_HINT = (
+    "## Decision Defaults needs at least one 'Situation | Default' row the human "
+    "confirmed at design time; Phase B takes the smallest default for an open "
+    "implementation detail instead of inventing a contract or stopping"
+)
+
+
+def _decision_errors(item: artifacts.Item) -> list[str]:
+    """The defaults table is what makes "continue instead of asking" safe."""
+    if artifacts.section(item.design_body, "Decision Defaults", "裁决默认值") is None:
+        return []  # the missing section is already reported by DESIGN_SECTIONS
+    rows = artifacts.parse_table(item.design_body, "Decision Defaults", "裁决默认值")
+    for row in rows:
+        cells = list(row.values())[:2]
+        if len(cells) < 2 or not all(cell.strip() for cell in cells):
+            continue
+        if not any(PLACEHOLDER_WORDS.search(cell) for cell in cells):
+            return []
+    return [DECISION_DEFAULTS_HINT]
+
+
+def _dependencies(value: str) -> list[str]:
+    return [
+        part for part in re.split(r"[,，;；\s]+", value) if part and part not in {"-", "—"}
+    ]
+
+
+def _repos(value: str) -> set[str]:
+    return {
+        part for part in re.split(r"[,，、;；\s]+", value) if part and part not in {"-", "—"}
+    }
+
+
+def acceptance_batches(item: artifacts.Item) -> dict[str, str]:
+    """AC id -> the first batch, in design order, that names it.
+
+    That batch accepts the AC black-box; a later batch that also covers it runs
+    regression only. Derived from `## Batches`, so there is no second table to
+    drift.
+    """
+    accepting: dict[str, str] = {}
+    for row in item.batches:
+        batch_id = artifacts.row_value(row, "Batch", "批次").strip()
+        if not BATCH_ID_RE.match(batch_id):
+            continue
+        for ac_id in AC_ID_RE.findall(artifacts.row_value(row, "AC", "覆盖 AC", "覆盖AC")):
+            accepting.setdefault(ac_id, batch_id)
+    return accepting
 
 
 def _batch_errors(item: artifacts.Item, batches: list[dict[str, str]]) -> list[str]:
@@ -172,11 +226,12 @@ def _batch_errors(item: artifacts.Item, batches: list[dict[str, str]]) -> list[s
             errors.append(f"{ac_id} is not covered by any batch")
 
     positions = {batch_id: index for index, batch_id in enumerate(ids)}
+    dependencies = {
+        batch_id: _dependencies(artifacts.row_value(rows_by_id[batch_id], "Depends", "依赖"))
+        for batch_id in ids
+    }
     for batch_id in ids:
-        depends = artifacts.row_value(rows_by_id[batch_id], "Depends", "依赖").strip()
-        for dependency in re.split(r"[,，;；\s]+", depends):
-            if not dependency or dependency in {"-", "—"}:
-                continue
+        for dependency in dependencies[batch_id]:
             if dependency == batch_id:
                 errors.append(f"batch {batch_id} depends on itself")
                 continue
@@ -188,6 +243,56 @@ def _batch_errors(item: artifacts.Item, batches: list[dict[str, str]]) -> list[s
                     f"batch {batch_id} depends on {dependency}, which is not an earlier batch; "
                     "dependencies must point backwards so the order is executable"
                 )
+
+    errors.extend(_parallel_errors(ids, rows_by_id, dependencies))
+    return errors
+
+
+def _parallel_errors(
+    ids: list[str],
+    rows_by_id: dict[str, dict[str, str]],
+    dependencies: dict[str, list[str]],
+) -> list[str]:
+    """A parallel group is legal only when its members share no repository.
+
+    A batch may run concurrently with the others in its group, so the two of them
+    must never write the same worktree, and neither may wait on the other.
+    """
+    errors: list[str] = []
+    groups: dict[str, dict[str, set[str]]] = {}
+    for batch_id in ids:
+        group = artifacts.row_value(rows_by_id[batch_id], "Parallel", "并行组").strip()
+        if not group or group in {"-", "—"}:
+            continue
+        repos = _repos(artifacts.row_value(rows_by_id[batch_id], "Repo", "仓库"))
+        if not repos:
+            errors.append(
+                f"{batch_id} is in parallel group {group} but names no repository; "
+                "concurrent batches are only safe when their repositories are known to be disjoint"
+            )
+        groups.setdefault(group, {})[batch_id] = repos
+
+    for group, members in groups.items():
+        owner: dict[str, str] = {}
+        for batch_id, repos in members.items():
+            for repo in sorted(repos):
+                if repo in owner:
+                    errors.append(
+                        f"{owner[repo]} and {batch_id} are in parallel group {group} "
+                        f"but both change {repo}; concurrent batches need disjoint repositories "
+                        "(one worktree, one writer) — drop the group or make the change serial"
+                    )
+                else:
+                    owner[repo] = batch_id
+        for batch_id, deps in dependencies.items():
+            if batch_id not in members:
+                continue
+            for dependency in deps:
+                if dependency in members:
+                    errors.append(
+                        f"{batch_id} depends on {dependency}, but both are in parallel group "
+                        f"{group}; a dependency is serial, so move one out of the group"
+                    )
     return errors
 
 

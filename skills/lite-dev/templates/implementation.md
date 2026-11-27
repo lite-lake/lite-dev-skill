@@ -15,4 +15,7 @@ item: <ID>
 
 ## Deviations
 
-- None. Scope or contract changes stop the batch and go back to design.
+- None. A gap in scope, a contract, the data model, or a security semantic stops
+  the batch and goes back to design. An implementation detail takes the default
+  in the design's `## Decision Defaults` and is recorded here with the reason and
+  the default it took.

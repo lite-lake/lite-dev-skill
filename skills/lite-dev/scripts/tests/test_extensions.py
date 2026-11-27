@@ -17,7 +17,7 @@ name = "ext-project"
 language = "en"
 
 [flow]
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -40,7 +40,7 @@ EXTENSION = """\
 name = "__NAME__"
 version = "1.0.0"
 description = "demo extension"
-requires = ">=0.5.0,<0.6"
+requires = ">=0.6.0,<0.7"
 
 [commands]
 demo_test = "echo demo"
@@ -106,7 +106,7 @@ class ExtensionTest(unittest.TestCase):
         self.assertIn("docs/design/README.md", profile.required_docs)
         self.assertIn("migrations/", profile.risk_paths)
         self.assertEqual(profile.extension_info[0]["source"], "project")
-        self.assertEqual(profile.extension_info[0]["requires"], ">=0.5.0,<0.6")
+        self.assertEqual(profile.extension_info[0]["requires"], ">=0.6.0,<0.7")
 
     def test_command_collision_is_an_error(self) -> None:
         self.write_extension(
@@ -118,7 +118,7 @@ class ExtensionTest(unittest.TestCase):
         self.assertIn("collides", str(caught.exception))
 
     def test_version_mismatch_is_an_error(self) -> None:
-        self.write_extension("demo", EXTENSION.replace(">=0.5.0,<0.6", ">=0.6"))
+        self.write_extension("demo", EXTENSION.replace(">=0.6.0,<0.7", ">=0.7,<0.8"))
         with self.assertRaises(profile_mod.ProfileError) as caught:
             self.load()
         self.assertIn("requires lite-dev", str(caught.exception))

@@ -212,15 +212,27 @@ Speak the plan in conversation first, then write the file. Start from
 `templates/design.md` with `flow.py design <ID>`; do not hand-build the scaffold.
 
 Required sections: Handoff, Diagram, Confirmation, Approach, Batches, Impact,
-Verification, Rollback; Open Decisions must be empty. Handoff must stand alone:
-Goal, Scope, Out, Verify, Rollback. The section headings are a parsing contract:
-translate the prose, not the heading.
+Verification, Decision Defaults, Rollback; Open Decisions must be empty. Handoff
+must stand alone: Goal, Scope, Out, Verify, Rollback. The section headings are a
+parsing contract: translate the prose, not the heading.
+
+`## Decision Defaults` is what makes "continue instead of asking" safe: a table
+of `Situation | Default` rows the human confirmed with the plan. `design-ready`
+refuses an empty one. Keep the rows you would defend later; delete the rest.
 
 Batch rules: list every `B1..Bn` up front, in order, with no gaps; every AC
 appears in at least one batch; a dependency must name an earlier batch (no
 forward edges, no cycles, no self-dependency); contracts and data model first,
 backend before frontend; after each batch the main branch builds and passes the
-gate.
+gate. Split by the outcome a human can observe, not by layer — a batch that
+produces nothing observable is merged into its neighbour, and a contract or
+schema batch is the exception that goes first alone.
+
+A batch may name a `Parallel` group. Members run concurrently, so they must name
+disjoint repositories and none may depend on another member; `design-ready`
+refuses a group that shares a repository, a member that names none, or a
+dependency inside one group. With one repository every batch shares the worktree,
+so the column is `—`.
 
 ## 7. Gates
 
@@ -261,15 +273,48 @@ overwrites an earlier batch's evidence. An implementer saying "tested" is not
 evidence, and `done` refuses any item without a passing report, without one row
 per AC, without a recorded full-level gate PASS, or without an identity.
 
-## 9. Stop conditions (ask the human)
+An AC is accepted once, black-box, in the first batch that names it — that
+batch is derived from `## Batches`, so no second table can disagree. A later
+batch that still covers the AC runs regression for what its change touches and
+appends that evidence; it does not accept the outcome a second time, and it does
+not treat it as unverified. `handoff --batch` names both sets, so the verifier
+never has to guess.
+
+## 9. Stop conditions (triaged)
+
+Classify before you stop. Only the first list asks the human; the other two
+continue and leave a record.
+
+**Hard stop — ask:**
 
 - The requirement is unclear or a business trade-off is needed.
 - The plan is not confirmed.
+- Scope, contracts, the data model, or a security semantic must change.
 - An irreversible action (data, permissions, credentials, release) has no rollback.
 - A destructive schema change is required.
 - The gate fails three times, or a batch fails verification twice.
 - Scope must grow, or work must be borrowed from another item.
 - Context is nearly exhausted: update `## Implementation`, then hand off.
+
+**Record and continue:** an implementation detail the design leaves open — a
+status code, a field name, wording, which existing component to reuse, a UI case
+the design skipped — takes the smallest default in the design's
+`## Decision Defaults` and is written as a deviation, with the default it took.
+Never invent a contract, a state, an error code, or a security decision, and
+never widen the batch. Ask once if a default is genuinely missing, but do not
+block on the answer: an open implementation detail is not a stop.
+
+**Environment blockage — record and continue:** a dependency that is not
+available (a service, a credential, an upstream, a machine) is written down as a
+blockage. Never fake it, never mock it into the product, never work around it in
+code. Continue the batches that do not need it, and stop only when it blocks
+every remaining batch. A subagent that fails for transport reasons is the same
+kind of event: check that the tree holds no half-done work, then resend the same
+dispatch once.
+
+Where the record goes: `## Deviations` in `implementation.md`, or `## Notes` in
+`item.md` when the item has no implementation record. A decision that changes
+the plan is not a default — it is the first list.
 
 ## 10. Red lines
 

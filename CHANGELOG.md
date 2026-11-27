@@ -2,6 +2,60 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.6.0 — 2026-11-27
+
+A batch can say it runs in parallel, an AC is accepted once instead of in every
+batch that touches it, and the stop list is triaged so an implementation detail
+no longer halts an item. What makes continuing safe is agreed in the design,
+before execution starts.
+
+### Added
+
+- `## Decision Defaults` in `design.md`: a `Situation | Default` table, filled in
+  Phase A and confirmed with the plan; `design-ready` refuses an empty one. It is
+  the mechanisation of invariant 11 — execution takes the smallest default for a
+  detail the plan leaves open, records the deviation, and continues.
+- A `Parallel` column in `## Batches`. Batches in one group run at the same time;
+  `design-ready` refuses a group whose members share a repository, a grouped batch
+  that names no repository, and a dependency between two members of one group. One
+  worktree has one writer, and a dependency is serial by definition. `handoff`
+  prints the group in the dispatch.
+- `handoff --batch` names the batch's acceptance set (the ACs it is the first to
+  name) and the ACs that are regression only. The accepting batch is derived from
+  `## Batches`, so there is no second table to drift.
+- `references/anti-patterns.md` gains "stopping on trivia" and "ceremony on an M".
+
+### Changed
+
+- SKILL.md section 9 is triaged: a hard stop asks the human, an open
+  implementation detail takes the design's default and leaves a record, and a
+  missing environment is recorded while the independent batches continue. A
+  subagent that fails for transport reasons is retried once instead of escalated,
+  with the paths of what it already produced.
+- An AC is accepted black-box once, in the first batch that names it; a later
+  batch runs regression for what its change touches. Comments in
+  `references/invariants.md` 5, `references/roles.md`, and
+  `references/one-shot-vs-two-phase.md`.
+- Batches are split by the outcome a human can observe, not by layer, with a
+  contract or schema batch as the one exception that goes first alone.
+- `references/workspace.md` gains "Parallel batches": the disjointness rule, the
+  per-repository gate scope, and the rule that the orchestrator writes
+  `implementation.md` after a group returns so two implementers never write it.
+- `templates/implementation.md` `## Deviations` states the two-level gap rule.
+- The template and bundled extensions pin `>=0.6.0,<0.7`.
+
+### Breaking changes
+
+- `## Decision Defaults` is a required design section. An existing ready design
+  without it fails `design-ready`, reports as invalid under `check`, and `status`
+  marks it `ready!` until the section is added. `flow.py design` scaffolds it, so
+  a new design needs no extra step.
+- A profile pinned to `>=0.5.0,<0.6` no longer loads. Move the pin to
+  `>=0.6.0,<0.7`; `init --upgrade` proposes it.
+- A batch table whose `Parallel` group names one repository twice is refused. The
+  5-column table still parses: `Parallel` is optional, and a short row means
+  "not grouped".
+
 ## 0.5.0 — 2026-11-27
 
 Adoption is a derived phase instead of a one-shot scaffold. A project is
