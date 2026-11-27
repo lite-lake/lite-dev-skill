@@ -2,6 +2,13 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 未发布
+
+### 变更
+
+- `.github/workflows/tests.yml` 也会跑 `scripts/tests`，镜像钩子「不重入自己的
+  dry run」这条护栏从此每次推送都被验证。
+
 ## 0.6.1 — 2026-11-27
 
 仓库多了一个只读的家：向 GitHub 推送时会顺带更新 cnb 副本，CI 负责证明两边一致。

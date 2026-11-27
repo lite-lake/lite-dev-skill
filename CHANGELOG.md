@@ -2,6 +2,13 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## Unreleased
+
+### Changed
+
+- `.github/workflows/tests.yml` also runs `scripts/tests`, so the mirror hook's
+  guard against re-entering its own dry run is proven on every push.
+
 ## 0.6.1 — 2026-11-27
 
 The repository has a second home: a push to GitHub also updates the read-only
