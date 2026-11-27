@@ -52,6 +52,7 @@ from flowlib import (  # noqa: E402
     adopt,
     archive,
     artifacts,
+    changelog,
     checks,
     commands,
     fsio,
@@ -82,6 +83,18 @@ DESIGN_TEMPLATE = SKILL_DIR / "templates" / "design.md"
 def _flow_invocation() -> str:
     """How this install tells a human to run the next step."""
     return f"python3 {SKILL_DIR / 'scripts' / 'flow.py'}"
+
+
+# Printed by `init --upgrade` when the install crosses a major version. The
+# long form lives in references/upgrade.md; this is the hard carrier's echo.
+MAJOR_CHECKLIST = (
+    "Read every section above, especially the [breaking] ones.",
+    "Re-read references/invariants.md and SKILL.md; a heading or rule may have changed.",
+    f"Run `flow.py extensions`; every enabled extension's requires must admit {__version__}.",
+    "Run `flow.py init --plan`; a new profile key or required document may exist.",
+    "Run `check` and the strictest gate level on this project.",
+    "Record the outcome, then rerun with --accept-major.",
+)
 
 
 def _wiring_refusal(profile, *, level: str | None = None) -> int | None:
@@ -449,7 +462,13 @@ def cmd_status(args) -> int:
     gate_relevant = any(item.status in {"ready", "done"} for item in items)
     stale = gate_log.stale_line(profile, full) if full and gate_relevant else None
     advisories = [
-        line for line in (checks.full_level_warning(profile), stale) if line
+        line
+        for line in (
+            checks.full_level_warning(profile),
+            stale,
+            profile_mod.drift_note(__version__, profile.reviewed),
+        )
+        if line
     ]
     stale_rows: list[dict] = []
     stale_note = ""
@@ -461,6 +480,8 @@ def cmd_status(args) -> int:
         payload = {
             "project": profile.name,
             "version": __version__,
+            "reviewed": profile.reviewed,
+            "drift": profile_mod.classify_drift(__version__, profile.reviewed),
             "profile": str(profile.path.relative_to(profile.root)),
             "checkout": checkout,
             "adoption": {
@@ -641,6 +662,112 @@ def _print_advisories(advisories: list[str]) -> None:
     print()
     for line in advisories:
         print(f"warn: {line}")
+
+
+def cmd_version(args) -> int:
+    """What this install is, and how it relates to the project's contract.
+
+    Answers even when the profile cannot load: a pin from another major is
+    exactly when a human runs it.
+    """
+    skill = str(SKILL_DIR)
+    commit = ""
+    dirty = False
+    repo = git.repo_of(SKILL_DIR)
+    if repo is not None and git.tracks(repo, SKILL_DIR):
+        try:
+            commit = git.head(repo)
+        except git.GitError:
+            commit = ""
+        try:
+            prefix = SKILL_DIR.resolve().relative_to(repo.resolve()).as_posix()
+        except ValueError:
+            prefix = ""
+        if prefix and prefix != ".":
+            dirty = any(
+                line[3:].strip().strip('"').startswith(prefix)
+                for line in git.dirty(repo)
+            )
+
+    profile_path: Path | None = None
+    if getattr(args, "profile", None):
+        profile_path = Path(args.profile).resolve()
+    else:
+        try:
+            profile_path = profile_mod.find_profile()
+        except ProfileError:
+            profile_path = None
+
+    requires = reviewed = language = ""
+    error = ""
+    if profile_path is not None:
+        try:
+            requires, reviewed, language = profile_mod.raw_flow_pins(profile_path)
+        except ProfileError as exc:
+            error = str(exc)
+        if not error:
+            try:
+                profile_mod.load(profile_path)
+            except ProfileError as exc:
+                error = str(exc)
+    effective = reviewed or profile_mod.range_floor(requires)
+    try:
+        drift = profile_mod.classify_drift(__version__, effective)
+    except ProfileError:
+        drift = "unknown"
+    changelog_path = str(changelog.skill_path(language or "en"))
+
+    if args.json:
+        payload = {
+            "version": __version__,
+            "skill": skill,
+            "commit": commit or None,
+            "dirty": dirty,
+            "project": str(profile_path) if profile_path else None,
+            "requires": requires or None,
+            "reviewed": effective or None,
+            "drift": drift,
+            "error": error or None,
+            "changelog": changelog_path,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"lite-dev {__version__}")
+    print(f"  skill:    {skill}")
+    if commit:
+        state = "dirty" if dirty else "clean"
+        print(f"  commit:   {commit[:12]} ({state})")
+    else:
+        print("  commit:   none (not a tracked checkout)")
+    if profile_path is None:
+        print("  project:  none (run init in a project root)")
+        return 0
+    print(f"  project:  {profile_path}")
+    print(f"  requires: {requires or '(missing)'}")
+    print(f"  reviewed: {effective or '(none)'}")
+    print(f"  drift:    {drift}{_drift_next(drift, effective)}")
+    print(f"  changelog: {changelog_path}")
+    if error:
+        print(f"  error:    {error}")
+    return 0
+
+
+def _drift_next(drift: str, reviewed: str) -> str:
+    if drift == "patch":
+        return " (seamless)"
+    if drift == "minor":
+        return (
+            f"; read CHANGELOG {reviewed}..{__version__}, then "
+            "init --upgrade --apply flow.reviewed"
+        )
+    if drift == "major":
+        return "; run init --upgrade, read the breaking sections, then pass --accept-major"
+    if drift in ("older-minor", "older-major"):
+        return f"; install lite-dev >= {reviewed}"
+    if drift == "unknown":
+        return "; run init --upgrade to record a reviewed version"
+    return ""
 
 
 def cmd_check(args) -> int:
@@ -1640,19 +1767,82 @@ def _report_adoption(profile, *, plan: bool, apply_ids: list[str]) -> int:
     return 0
 
 
+def _print_version_review(plan: adopt.Plan) -> None:
+    """Show what the agent must read before accepting a Y or an X change."""
+    if not plan.drift:
+        return
+    to = plan.review_to or __version__
+    low = plan.review_from
+    if plan.drift == "patch":
+        print(f"review:  patch {low or '?'} -> {to} (no review needed)")
+        return
+    if plan.drift in ("older-minor", "older-major"):
+        print(
+            f"review:  this install {to} is older than reviewed {low}; "
+            "install the reviewed version"
+        )
+        return
+
+    print(f"review:  {plan.drift} {low or '?'} -> {to}")
+    path = changelog.skill_path(plan.language)
+    try:
+        items = changelog.between(path, low, to)
+    except FlowError as exc:
+        print(f"  read:  {exc}")
+        print(f"         {changelog.URL}/{path.name}")
+        return
+    if not items:
+        print(f"  read:  {path.name} has no section for {low or '?'}..{to}")
+        return
+    span = f"{low}..{to}" if low else to
+    print(f"  read:  {path.name} {span}")
+    for line in changelog.render(items, mark_breaking=(plan.drift == "major")):
+        print(f"    {line}" if line else "")
+    if plan.drift == "major":
+        print("  checklist (references/upgrade.md):")
+        for index, item in enumerate(MAJOR_CHECKLIST, 1):
+            print(f"    {index}. {item}")
+
+
 def _cmd_upgrade(profile_path: Path, args) -> int:
-    """Propose (and optionally apply) the version-pin migration.
+    """Propose (and optionally apply) the version-contract migration.
 
     This path reads the raw profile on purpose: a pin from an older install
-    fails to load, and "install a different skill" is not a migration.
+    fails to load, and "install a different skill" is not a migration. Z is
+    seamless; Y shows the changelog range; X also needs `--accept-major` after
+    the checklist.
     """
     if not profile_path.is_file():
         print(f"error: no profile at {profile_path}; run `flow.py init` first", file=sys.stderr)
         return 2
     proposal_plan = adopt.upgrade_plan(profile_path)
+    _print_version_review(proposal_plan)
+    major = proposal_plan.drift == "major"
+
     print("upgrade:")
     for line in adopt.render_plan(proposal_plan):
         print(line)
+
+    applicable = [proposal.id for proposal in proposal_plan.proposals if proposal.applicable]
+    pending_requires = (
+        proposal_plan.find("flow.requires") is not None
+        and "flow.requires" not in (args.apply or [])
+    )
+    if applicable and not args.apply:
+        command = f"{_flow_invocation()} init --upgrade"
+        if major:
+            command += " --accept-major"
+        command += " " + " ".join(f"--apply {proposal_id}" for proposal_id in applicable)
+        print("next:")
+        print(f"  {command}")
+
+    if major and args.apply and not getattr(args, "accept_major", False):
+        print(
+            "error: crossing a major version requires --accept-major after the "
+            "checklist in references/upgrade.md",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.apply:
         try:
@@ -1667,6 +1857,11 @@ def _cmd_upgrade(profile_path: Path, args) -> int:
             return 2
         for proposal_id in applied:
             print(f"applied: {proposal_id}")
+        if pending_requires:
+            print(
+                "note:    flow.requires is still pending; the profile will not "
+                "load until it is applied"
+            )
         proposal_plan = adopt.upgrade_plan(profile_path)
         if proposal_plan.proposals:
             print("\nremaining:")
@@ -1865,6 +2060,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="propose a version-pin migration for this install",
     )
     init_parser.add_argument(
+        "--accept-major",
+        action="store_true",
+        help="required to apply an upgrade that crosses a major version",
+    )
+    init_parser.add_argument(
         "--baseline",
         action="store_true",
         help="record HEAD as [reconcile] baseline; needs a clean tree",
@@ -1901,6 +2101,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument("--json", action="store_true", help="machine-readable output")
     status_parser.set_defaults(func=cmd_status)
+
+    version_parser = subparsers.add_parser(
+        "version", help="show the running skill version and the project's version contract"
+    )
+    add_common(version_parser)
+    version_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    version_parser.set_defaults(func=cmd_version)
 
     check_parser = subparsers.add_parser("check", help="validate artifacts and links")
     add_common(check_parser)

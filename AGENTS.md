@@ -40,6 +40,11 @@ every template.
    `references/invariants.md` are debts: when you add or change an invariant,
    name the mechanisation candidate. An escape hatch is a record with a reason
    and an expiry (`[[exempt]]`), never a permanent switch.
+9. **Version numbers are a contract.** Bump Z for a compatible fix, Y for a
+   change a project must review against its CHANGELOG, and X for a contract
+   change. `scripts/check_release.py` keeps `__version__`, both changelogs, the
+   skill's bundled copies, the template, and the extensions in agreement; the
+   policy itself lives in `references/invariants.md` (Compatibility).
 
 ## Remotes
 
@@ -69,6 +74,9 @@ rewritten, `--sync --force` is the deliberate repair.
   `new → check → status → design-ready → gate → done`.
 - Update `CHANGELOG.md` **and** `CHANGELOG.zh.md`; note breaking changes
   explicitly. Same for `README.md` / `README.zh.md`.
+- `python3 scripts/check_release.py --sync` when the changelog changed, then
+  `python3 scripts/check_release.py`: the version, both changelogs, the skill's
+  bundled copies, the template, and the extensions agree.
 - `python3 scripts/push_mirror.py --check` passes: the cnb replica matches
   `origin`.
 - Nothing is published before 1.0.0: change the protocol freely and keep both

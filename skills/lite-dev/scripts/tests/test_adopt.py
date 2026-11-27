@@ -23,7 +23,7 @@ name = "legacy"
 language = "en"
 
 [flow]
-requires = ">=0.6.0,<0.7"
+requires = ">=0.7.0,<1.0"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -253,7 +253,7 @@ dir = "docs/flow/extensions"
         )
         self.write(
             "docs/flow/extensions/demo/extension.toml",
-            'name = "demo"\nversion = "1.0.0"\nrequires = ">=0.6.0,<0.7"\n'
+            'name = "demo"\nversion = "1.0.0"\nrequires = ">=0.7.0,<1.0"\n'
             '[[detect]]\nfile = "go.mod"\ncommand = "go test ./..."\n',
         )
         self.write("go.mod", "module example.com/demo\n")
@@ -359,7 +359,7 @@ class ApplyTest(Base):
 
 class UpgradeTest(Base):
     def test_upgrade_proposes_and_applies_the_pin(self) -> None:
-        self.scaffold(PROFILE.replace(">=0.6.0,<0.7", ">=0.3.9,<0.4"))
+        self.scaffold(PROFILE.replace(">=0.7.0,<1.0", ">=0.3.9,<0.4"))
         plan = adopt.upgrade_plan(self.profile_path)
         proposal = plan.find("flow.requires")
         self.assertIsNotNone(proposal)
@@ -368,7 +368,7 @@ class UpgradeTest(Base):
         self.assertEqual(self.load().requires, proposal.value)
 
     def test_upgrade_reports_commands_it_cannot_invent(self) -> None:
-        self.scaffold(PROFILE.replace(">=0.6.0,<0.7", ">=0.3.9,<0.4"))
+        self.scaffold(PROFILE.replace(">=0.7.0,<1.0", ">=0.3.9,<0.4"))
         plan = adopt.upgrade_plan(self.profile_path)
         self.assertTrue(any("unconfigured" in note for note in plan.notes))
 

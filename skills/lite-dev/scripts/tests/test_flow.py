@@ -27,7 +27,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.6.0,<0.7"
+requires = ">=0.7.0,<1.0"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -332,7 +332,7 @@ class ProfileTest(BaseCase):
     def test_flow_requires_pins_the_version(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('requires = ">=0.6.0,<0.7"', 'requires = ">=9,<10"'),
+            PROFILE.replace('requires = ">=0.7.0,<1.0"', 'requires = ">=9,<10"'),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)
@@ -341,7 +341,7 @@ class ProfileTest(BaseCase):
     def test_flow_table_is_required(self) -> None:
         self._write(
             self.profile_path,
-            PROFILE.replace('[flow]\nrequires = ">=0.6.0,<0.7"\n\n', ""),
+            PROFILE.replace('[flow]\nrequires = ">=0.7.0,<1.0"\n\n', ""),
         )
         with self.assertRaises(profile_mod.ProfileError) as raised:
             profile_mod.load(self.profile_path)

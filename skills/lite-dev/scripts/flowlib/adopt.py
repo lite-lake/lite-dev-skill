@@ -218,6 +218,12 @@ class Plan:
     proposals: list[Proposal] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     advice: list[str] = field(default_factory=list)
+    # Set by `upgrade_plan`: how the running install relates to the version the
+    # project last reviewed, and the range the agent has to read.
+    drift: str = ""
+    review_from: str = ""
+    review_to: str = ""
+    language: str = "en"
 
     def find(self, proposal_id: str) -> Proposal | None:
         for proposal in self.proposals:
@@ -262,8 +268,11 @@ def upgrade_plan(profile_path: Path) -> Plan:
     """The same idea, for a profile the loader cannot accept yet.
 
     A version pin from an older install fails to load, so this path reads the
-    raw TOML instead of a `Profile`. It never guesses a command: only the pin is
-    a proposal, and the rest is advice.
+    raw TOML instead of a `Profile`. It never guesses a command: only the version
+    contract is a proposal, and the rest is advice.
+
+    The plan also classifies the drift (Z seamless, Y review, X deep check) and
+    names the changelog range the agent has to read; `_cmd_upgrade` renders it.
     """
     result = Plan()
     try:
@@ -274,22 +283,68 @@ def upgrade_plan(profile_path: Path) -> Plan:
         raise FlowError(f"{profile_path}: invalid TOML: {exc}") from exc
 
     flow_table = raw.get("flow") or {}
+    if not isinstance(flow_table, dict):
+        flow_table = {}
     requires = flow_table.get("requires", "")
     if not isinstance(requires, str):
         raise FlowError("[flow] requires must be a string")
+    reviewed = flow_table.get("reviewed", "")
+    if not isinstance(reviewed, str):
+        raise FlowError("[flow] reviewed must be a string")
+    project = raw.get("project") or {}
+    if not isinstance(project, dict):
+        project = {}
+    language = project.get("language", "en")
+    if not isinstance(language, str) or language not in ("en", "zh"):
+        language = "en"
+
+    running = profile_mod.__version__
+    baseline = reviewed.strip() or profile_mod.range_floor(requires)
+    result.language = language
+    result.review_from = baseline
+    result.review_to = running
+    try:
+        result.drift = profile_mod.classify_drift(running, baseline)
+    except ProfileError:
+        result.notes.append(
+            f"reviewed {baseline!r} is not a version; it will be replaced"
+        )
+
+    if result.drift in ("older-minor", "older-major"):
+        result.notes.append(
+            f"this install is {running}, older than the project's reviewed "
+            f"{baseline}; install lite-dev >= {baseline} instead of lowering reviewed"
+        )
+    elif reviewed.strip() != running:
+        result.proposals.append(
+            Proposal(
+                id="flow.reviewed",
+                value=running,
+                source=f"this install is {running}",
+                section="flow",
+                key="reviewed",
+                expect=reviewed if "reviewed" in flow_table else ABSENT,
+                invocation="flow.py init --upgrade",
+            )
+        )
+
     current = _compat_range()
-    if requires.strip() != current:
+    if requires.strip() != current and result.drift not in (
+        "older-minor",
+        "older-major",
+    ):
         result.proposals.append(
             Proposal(
                 id="flow.requires",
                 value=current,
-                source=f"this install is {profile_mod.__version__}",
+                source=f"this install is {running}",
                 section="flow",
                 key="requires",
                 expect=requires,
                 invocation="flow.py init --upgrade",
             )
         )
+
     commands = raw.get("commands") or {}
     unconfigured = sorted(
         name for name, command in commands.items()

@@ -41,9 +41,15 @@ work_dir = "docs/work"
 # required = false
 
 [flow]
-# Required. Pin the lite-dev version this project targets; an incompatible
-# install is a profile error, so every machine runs the same gate.
-requires = ">=0.6.0,<0.7"
+# Required. The hard window: same major, from this minor's `.0`. An install
+# outside it is a profile error, so every machine runs a compatible gate.
+# Z (patch) inside the window is seamless; Y (minor) still loads but warns, so
+# the agent reads the CHANGELOG between `reviewed` and the running version;
+# X (major) is outside the window and needs `init --upgrade --accept-major`.
+requires = ">=0.7.0,<1.0"
+# The exact version this project was last reconciled with. `init` writes it;
+# `init --upgrade --apply flow.reviewed` moves it after the review.
+reviewed = "0.7.0"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of

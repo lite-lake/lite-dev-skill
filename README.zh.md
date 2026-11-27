@@ -121,26 +121,52 @@
 
 暂时修不了的漂移，用一条 `[[exempt]]` 记录（一个检查、一个路径、一个理由、一个到期
 日）——`--plan` 打印形状，理由和日期由人填。旧版本钉住的 profile 用
-`flow.py init --upgrade` 迁移：它读取自己无法加载的 pin，并给出当前兼容区间。
-细节见 [adoption.md](skills/lite-dev/references/adoption.md)。
+`flow.py init --upgrade` 迁移：它读取自己无法加载的 pin，并给出新的版本契约
+（`requires` 与 `reviewed`）。细节见
+[adoption.md](skills/lite-dev/references/adoption.md)。
 
 不做任何回填：不补造追溯条目，不重写历史。确实等不及条目的改动，用发布 `--note`
 记录欠账，`reconcile` 会让它一直可见。
+
+## 版本策略
+
+`init` 会在 `docs/flow/profile.toml` 里钉住两个值：
+
+```toml
+[flow]
+requires = ">=X.Y.0,<X+1.0"   # 硬窗口：同 major，由 init 推导
+reviewed = "X.Y.Z"            # 项目上次核对的精确版本
+```
+
+版本的三段各有含义，工作量也不同：
+
+| 变化 | 含义 | 工具行为 |
+|---|---|---|
+| Z（补丁） | 兼容修复 | 正常加载，不提示 |
+| Y（小版本） | 可能不兼容 | 正常加载；`status`、`check`、`gate` 给出 CHANGELOG 区间警告；`init --upgrade --apply flow.reviewed` 记录审阅 |
+| X（大版本） | 契约变化 | 拒绝加载；`init --upgrade` 打印破坏性段落和清单；apply 需要 `--accept-major` |
+
+`flow.py version` 回答这台机器装了什么、项目上次审阅到哪、属于哪种情况——profile
+无法加载时也能回答。审阅步骤与大版本清单见
+[upgrade.md](skills/lite-dev/references/upgrade.md)。skill 自带两份 changelog，
+复制安装也能离线阅读。
 
 ## 仓库结构
 
 ```text
 spec/invariants.md          给人看的入口，指向唯一权威文件
+scripts/check_release.py    版本/变更日志/模板/扩展的一致性闸门
 skills/lite-dev/            可安装的 skill，依赖全部在目录内
   SKILL.md                  入口：原则、路由、停止条件、红线
   profile.template.toml     复制到 docs/flow/profile.toml
+  CHANGELOG.md / .zh.md     随 skill 分发的发布历史，供升级审阅阅读
   references/               不变量 + 按情境加载的细则
                             （adoption.md 讲如何引入流程；
                             workspace.md 讲一个根多个仓库）
   templates/                item / design / test-report / implementation / release / retro / decision
   extensions/               随 skill 分发的扩展（go-service、security-scan、deploy-lane）
-  scripts/flow.py           init / new / claim / whoami / status / check / design /
-                            design-ready / gate / done / drop / handoff / archive /
+  scripts/flow.py           init / new / claim / whoami / status / version / check /
+                            design / design-ready / gate / done / drop / handoff /
                             unarchive / release / reconcile / extensions
   scripts/flowlib/          profile、身份、产物解析、检查、文档卫生、门禁账本、
                             交接提示词、归档、命令执行、项目脚手架、接入阶梯与建议、

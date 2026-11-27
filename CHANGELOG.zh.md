@@ -9,6 +9,39 @@
 - `.github/workflows/tests.yml` 也会跑 `scripts/tests`，镜像钩子「不重入自己的
   dry run」这条护栏从此每次推送都被验证。
 
+## 0.7.0 — 2026-11-27
+
+技能版本的每一段现在有各自的语义：补丁无缝，小版本仍加载但给出要读的 CHANGELOG，
+大版本必须先完成检查清单。profile 记录上次审阅的精确版本，`version` 回答这台机器
+装的是什么。
+
+### 破坏性变更
+
+- `[flow] requires` 改为覆盖整个 major 线（`>=0.7.0,<1.0`），新增
+  `[flow] reviewed` 记录项目上次核对过的精确版本。钉在 `>=0.6.0,<0.7` 的 profile
+  不再加载；`init --upgrade` 会读取它并同时提出两个值。
+- 小版本（Y）变化不再在加载时被拦住：profile 正常加载，`status`、`check`、`gate`
+  给出带 CHANGELOG 区间的警告。大版本（X）仍拒绝加载，`init --upgrade --apply`
+  需要先完成 `references/upgrade.md` 的清单并带上 `--accept-major`。
+- 内置扩展改为钉 `>=0.7.0,<1.0`。
+
+### 新增
+
+- `flow.py version [--json]`：运行版本、skill 的 commit 与脏状态（仅当它是被跟踪的
+  检出）、项目的 `requires` / `reviewed`、漂移级别和下一步命令。profile 加载失败时
+  也能回答。
+- `init --upgrade` 判定漂移级别，并打印 `reviewed` 到运行版本之间的 CHANGELOG 段落
+  （大版本把破坏性段落标为 `[breaking]`）。`--accept-major` 拦住大版本；apply 可以
+  同时点名两个提案。
+- `scripts/check_release.py`（及 CI）校验 `__version__`、两份 changelog、skill 内
+  副本、profile 模板和内置扩展彼此一致；`--sync` 重新生成副本。
+- skill 自带 `CHANGELOG.md` 与 `CHANGELOG.zh.md`，复制安装也能离线看到审阅文本。
+
+### 变更
+
+- `compat_range` 推导 `>=X.Y.0,<X+1.0`；补丁位不再抬高下界。
+- `status --json` 增加 `reviewed` 与 `drift`；pin 拒绝加载时用 `version` 诊断。
+
 ## 0.6.1 — 2026-11-27
 
 仓库多了一个只读的家：向 GitHub 推送时会顺带更新 cnb 副本，CI 负责证明两边一致。

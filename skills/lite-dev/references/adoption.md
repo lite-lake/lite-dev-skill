@@ -106,19 +106,24 @@ note = "go.mod (go-service extension)"
 `go-service` extension ships one as the pattern. Core keeps the mechanism and
 the language-agnostic probes; an ecosystem belongs in an extension.
 
-## Upgrading a pin
+## Version drift
 
-A profile from an older install fails to load — `install the matching skill
-version` is not a migration. `init --upgrade` reads the raw profile (it cannot
-load it), proposes the current compatibility range, and lists commands it cannot
-invent:
+A profile from an older install may not load, and "install the matching skill
+version" is not a migration. The version has three components: a patch is
+seamless, a minor still loads but asks for a CHANGELOG review, and a major
+refuses until the checklist is acknowledged. `init --upgrade` reads the raw
+profile (it cannot load it), classifies the drift, prints the changelog range,
+and proposes both `flow.requires` and `flow.reviewed`:
 
 ```bash
 flow.py init --upgrade
-flow.py init --upgrade --apply flow.requires
+flow.py init --upgrade --apply flow.requires --apply flow.reviewed
 ```
 
-After the pin is fixed, run `init --plan` to wire commands, then `check`.
+`--apply flow.requires` alone widens the window but leaves the review pending.
+A major crossing also needs `--accept-major`; the full checklist is in
+[upgrade](upgrade.md). After the contract is current, run `init --plan` to wire
+commands, then `check`.
 
 ## What it does not do
 

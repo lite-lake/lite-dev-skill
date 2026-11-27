@@ -82,6 +82,22 @@ def repo_of(path: Path) -> Path | None:
     return Path(text) if text else None
 
 
+def tracks(root: Path, path: Path) -> bool:
+    """True when `path` is inside `root` and versioned by that repository.
+
+    A skill copied into a project sits inside a work tree but is not tracked
+    there; its version says nothing about that project's history.
+    """
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return False
+    try:
+        return bool(_run(root, "ls-files", "--", relative).strip())
+    except GitError:
+        return False
+
+
 def config_get(root: Path, key: str) -> str:
     """Read a git config value; empty when it is not set."""
     return _run(root, "config", "--get", key, check=False).strip()

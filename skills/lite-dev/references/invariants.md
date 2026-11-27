@@ -269,7 +269,29 @@ that teaches people to ignore the file.
   identity policy, languages, the project root, the control repository, the
   declared repositories, document stores and surfaces, and each command's
   working directory.
-- An extension version must state the lite-dev version range it supports.
+- The profile pins the skill twice: `[flow] requires` is the hard window
+  (`>=X.Y.0,<X+1.0`, derived by `init`, never hand-tuned) and `[flow] reviewed`
+  is the exact version the project last reconciled with. A profile from an
+  older install has no `reviewed`; it falls back to the range floor.
+- Drift is classified by component, not by a generic "incompatible":
+  - **Z (patch)** is seamless: the profile loads and nothing is reported.
+  - **Y (minor)** may be incompatible: the profile loads, but `status`,
+    `check`, and `gate` warn and name the CHANGELOG range; `init --upgrade`
+    prints that range and `--apply flow.reviewed` records the review. A warning
+    never blocks the gate.
+  - **X (major)** is a contract change: it falls outside `requires`, the profile
+    does not load, and `init --upgrade --apply` refuses without
+    `--accept-major` after the checklist in [upgrade](upgrade.md).
+- An install older than `reviewed` is a downgrade. Install the reviewed
+  version; never lower `reviewed` to make an old install load.
+- **Enforced**: `version` reports running/reviewed/drift and still answers when
+  the profile cannot load; `profile.load` rejects a `reviewed` outside
+  `requires`; `checks.check_project` adds the minor/older advisory;
+  `init --upgrade` classifies the drift and renders the changelog sections;
+  `scripts/check_release.py` keeps `__version__`, both changelogs, the skill's
+  bundled copies, the template, and the extensions in agreement.
+- An extension version must state the lite-dev version range it supports. A
+  bundled extension uses the same major window as the skill.
 - Nothing is published before 1.0.0, so this file may change freely. 1.0.0 is
   the first public release; from then on, a change to this file is a breaking
   change and requires a major version bump and a note in both changelogs.

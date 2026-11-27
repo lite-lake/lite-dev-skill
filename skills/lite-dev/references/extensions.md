@@ -22,7 +22,7 @@ keep exactly one copy.
 name = "go-service"
 version = "1.0.0"
 description = "Go service commands"
-requires = ">=0.6.0,<0.7"
+requires = ">=0.7.0,<1.0"
 
 [commands]
 go_build = "go build ./..."

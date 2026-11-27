@@ -11,8 +11,8 @@ license: BSD-2-Clause
 
 > Run every command from the project root.
 > There is exactly one flow. Do not invent states, roles, or approvals.
-> Tools: `init`, `new`, `status`, `check`, `design`, `design-ready`, `gate`,
-> `done`, `drop`, `claim`, `whoami`, `handoff`, `archive`, `unarchive`,
+> Tools: `init`, `new`, `status`, `version`, `check`, `design`, `design-ready`,
+> `gate`, `done`, `drop`, `claim`, `whoami`, `handoff`, `archive`, `unarchive`,
 > `release`, `reconcile`, `extensions`.
 
 ## 0. Four principles
@@ -46,6 +46,7 @@ Never edit a status by hand.
 | Session boundary or resume | — | `handoff <ID> [--batch Bx]` |
 | Harness has no subagents | [references/harness-modes.md](references/harness-modes.md) | sequential roles |
 | Releasing | [references/release-channels.md](references/release-channels.md) | `release --channel <name>` |
+| Skill version drift or a major upgrade | [references/upgrade.md](references/upgrade.md) | `version`, `init --upgrade` |
 | More than one person or machine | [references/collaboration.md](references/collaboration.md) | set `lite-dev.owner`, then `new` |
 | One root, several repositories | [references/workspace.md](references/workspace.md) | `status` (repos), `gate --repo` |
 | Others bypassed the flow | [references/reconcile.md](references/reconcile.md) | `reconcile` |
@@ -115,7 +116,9 @@ python3 <skill>/scripts/flow.py extensions
   files. Only S1 blocks. `--plan` reads the repository and proposes profile
   values; `--apply <id>` writes one, and refuses if the value it expected
   changed. `--baseline` records `HEAD` as `[reconcile] baseline` on a clean tree.
-  `--upgrade` reads a profile too old to load and proposes the version pin.
+  `--upgrade` reads a profile too old to load, classifies the drift (patch is
+  seamless, minor shows the changelog, major needs `--accept-major`), and
+  proposes `requires` and `reviewed`.
   `--adopt` is `init` followed by `--plan`. Details:
   [references/adoption.md](references/adoption.md).
 - `new` allocates `{date}-{type}-{time}` and creates
@@ -203,6 +206,11 @@ machine. The loader rejects unknown keys and incompatible `requires` ranges.
 A bundled extension ships its scripts inside the skill and names them with
 `{skill}`; the loader expands it, so nothing is hardcoded per machine.
 Details: [references/extensions.md](references/extensions.md).
+
+The skill version itself uses the same contract: `requires` is the hard window,
+`reviewed` is the exact version this project last reconciled with, and a minor
+drift warns instead of blocking. `version` reports both; [upgrade.md](upgrade.md)
+has the review and the major checklist.
 
 ## 6. Writing a design
 

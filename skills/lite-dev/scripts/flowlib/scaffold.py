@@ -44,14 +44,18 @@ def relative(root: Path, path: Path) -> str:
 
 
 def compat_range(version: str) -> str:
-    """The range a freshly scaffolded profile pins: this line, not the next one."""
+    """The hard window a profile pins: this major, from this minor's `.0`.
+
+    A patch inside the window is seamless; a minor still loads and warns
+    because it may be incompatible; a major is outside the window and needs
+    `init --upgrade --accept-major`.
+    """
     parts = version.split(".")
     try:
         major, minor = int(parts[0]), int(parts[1])
     except (IndexError, ValueError):
         raise ProfileError(f"cannot derive a compatibility range from version {version!r}")
-    upper = f"{major + 1}.0" if major else f"{major}.{minor + 1}"
-    return f">={version},<{upper}"
+    return f">={major}.{minor}.0,<{major + 1}.0"
 
 
 def _toml_string(value: str) -> str:
@@ -72,6 +76,7 @@ def render_profile(
         (r'(?m)^name = "my-project"$', f"name = {_toml_string(name)}"),
         (r'(?m)^language = "en"', f'language = "{language}"'),
         (r"(?m)^requires = \">=.*\"$", f'requires = "{compat_range(version)}"'),
+        (r'(?m)^reviewed = ".*"$', f'reviewed = "{version}"'),
         (r'(?m)^mainline = ".*"$', f"mainline = {_toml_string(mainline)}"),
     )
     text = template
@@ -81,7 +86,7 @@ def render_profile(
             raise ProfileError(
                 "cannot scaffold from profile.template.toml: the line matching "
                 f"{pattern!r} appears {count} time(s). Copy the template by hand "
-                "and set `name`, `requires`, and `mainline`."
+                "and set `name`, `requires`, `reviewed`, and `mainline`."
             )
     return text
 

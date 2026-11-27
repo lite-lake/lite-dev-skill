@@ -34,7 +34,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.6.0,<0.7"
+requires = ">=0.7.0,<1.0"
 
 [id]
 format = "{date}-{type}-{time}"
@@ -246,7 +246,7 @@ docs_dir = "docs"
 work_dir = "docs/work"
 
 [flow]
-requires = ">=0.6.0,<0.7"
+requires = ">=0.7.0,<1.0"
 
 [id]
 format = "{date}-{type}-{time}"

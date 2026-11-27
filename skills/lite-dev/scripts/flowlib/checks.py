@@ -5,9 +5,18 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+from . import __version__
 from . import artifacts, docs, git, identity
 from .errors import FlowError
-from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile, wiring_problems
+from .profile import (
+    MODES,
+    PRIORITIES,
+    SIZES,
+    TYPES,
+    Profile,
+    drift_note,
+    wiring_problems,
+)
 
 DESIGN_SECTIONS = (
     "Handoff",
@@ -955,6 +964,12 @@ def check_project(
 
     for problem in wiring_problems(profile):
         warnings.append(f"{problem} (adoption S1)")
+
+    # A Y change loads and may be incompatible; a Z change is seamless. This is
+    # advisory: the gate still runs, but the agent has to see the changelog.
+    version_note = drift_note(__version__, profile.reviewed)
+    if version_note:
+        warnings.append(version_note)
 
     if work is None:
         warnings.extend(repo_warnings(profile))

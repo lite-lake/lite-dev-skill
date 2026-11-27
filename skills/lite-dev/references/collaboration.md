@@ -90,9 +90,10 @@ will conflict, and git will ask you to decide which facts to keep.
 teammate's broken WIP item does not block your batch. A bare `check` and
 `release --record` validate the whole project; that is the integration point.
 
-Pin `[flow] requires` in the profile. It is required: a machine running a
-different skill version stops with a profile error instead of running a gate
-with different rules.
+Pin `[flow] requires` and `[flow] reviewed` in the profile. They are required:
+a machine outside the window stops with a profile error, and a machine on a
+different minor still loads but warns. That is why a teammate sees the same
+CHANGELOG range you reviewed, instead of a gate that quietly changed rules.
 
 ## Releases
 

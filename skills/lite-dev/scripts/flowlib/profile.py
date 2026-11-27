@@ -161,6 +161,7 @@ class Profile:
     extension_info: list[dict]
     extension_detectors: list[dict]
     requires: str
+    reviewed: str
     id_pattern: re.Pattern
 
     @property
@@ -480,6 +481,111 @@ def satisfies(version: str, spec: str) -> bool:
         if operator == "==" and not current == wanted:
             return False
     return True
+
+
+def parse_version(text: str) -> tuple[int, int, int]:
+    """Public form of `_parse_version`, for callers that compare components."""
+    return _parse_version(text)
+
+
+def range_floor(spec: str) -> str:
+    """The highest lower bound of a range, as X.Y.Z, or "" when it has none.
+
+    A range may leave its floor implicit (`<1.0`); that is not a version this
+    project was reviewed against, so the caller treats it as unknown.
+    """
+    floor: tuple[int, int, int] | None = None
+    for clause in spec.split(","):
+        clause = clause.strip()
+        if not clause:
+            continue
+        match = re.match(r"^(>=|>|==)?\s*(.+)$", clause)
+        if not match:
+            continue
+        operator = match.group(1)
+        if operator in ("<", "<="):
+            continue
+        try:
+            candidate = _parse_version(match.group(2))
+        except ProfileError:
+            continue
+        if operator == ">":
+            # `>0.6.0` excludes its own operand; the smallest version it admits
+            # is the next patch, which is what a reviewed fallback must be.
+            candidate = (candidate[0], candidate[1], candidate[2] + 1)
+        if floor is None or candidate > floor:
+            floor = candidate
+    return ".".join(str(part) for part in floor) if floor else ""
+
+
+def classify_drift(running: str, reviewed: str) -> str:
+    """How the running install relates to the project's reviewed version.
+
+    Z is seamless, Y may be incompatible and needs the CHANGELOG, X is a
+    different contract. Direction matters: an install older than what the
+    project reviewed is a downgrade, not an upgrade.
+    """
+    if not (running or "").strip() or not (reviewed or "").strip():
+        return "unknown"
+    current = _parse_version(running)
+    base = _parse_version(reviewed)
+    if current[:2] == base[:2]:
+        return "patch"
+    if current[0] == base[0]:
+        return "minor" if current[1] > base[1] else "older-minor"
+    return "major" if current[0] > base[0] else "older-major"
+
+
+def drift_note(running: str, reviewed: str) -> str:
+    """The one-line advisory for a version that is not a seamless patch.
+
+    Empty when there is nothing to report. A major crossing cannot reach this
+    path in a loaded profile: `requires` refuses it first. The note is a
+    warning, never a refusal.
+    """
+    drift = classify_drift(running, reviewed)
+    if drift == "minor":
+        return (
+            f"lite-dev {running} is a minor ahead of this project's reviewed "
+            f"{reviewed}; read CHANGELOG {reviewed}..{running}, then run "
+            "init --upgrade --apply flow.reviewed"
+        )
+    if drift in ("older-minor", "older-major"):
+        return (
+            f"lite-dev {running} is older than this project's reviewed {reviewed}; "
+            f"install lite-dev >= {reviewed} instead of lowering the review"
+        )
+    return ""
+
+
+def raw_flow_pins(path: Path) -> tuple[str, str, str]:
+    """Read the version contract without validating the rest of the profile.
+
+    `version` must answer when the profile cannot load, and `init --upgrade`
+    needs the same raw view. Returns `(requires, reviewed, language)`.
+    """
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise ProfileError(f"cannot read {path}: {exc}") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ProfileError(f"{path}: invalid TOML: {exc}") from exc
+    flow_table = raw.get("flow") or {}
+    if not isinstance(flow_table, dict):
+        flow_table = {}
+    requires = flow_table.get("requires", "")
+    reviewed = flow_table.get("reviewed", "")
+    if not isinstance(requires, str):
+        raise ProfileError("[flow] requires must be a string")
+    if not isinstance(reviewed, str):
+        raise ProfileError("[flow] reviewed must be a string")
+    project = raw.get("project") or {}
+    if not isinstance(project, dict):
+        project = {}
+    language = project.get("language", "en")
+    if not isinstance(language, str) or language not in ("en", "zh"):
+        language = "en"
+    return requires.strip(), reviewed.strip(), language
 
 
 def _expand(command: str) -> str:
@@ -987,7 +1093,7 @@ def load(path: Path | str | None = None) -> Profile:
     _allow_keys(reconcile, ("risk_paths", "baseline"), "[reconcile]")
     _allow_keys(extensions, ("enabled", "dir"), "[extensions]")
     _allow_keys(workspace, ("control", "repo"), "[workspace]")
-    _allow_keys(flow_table, ("requires",), "[flow]")
+    _allow_keys(flow_table, ("requires", "reviewed"), "[flow]")
     _allow_keys(gate, (*LEVELS, "fallback_paths", "fresh_days"), "[gate]")
 
     name = _require(project, "name", "[project]")
@@ -1085,8 +1191,23 @@ def load(path: Path | str | None = None) -> Profile:
     if not satisfies(__version__, requires):
         raise ProfileError(
             f"this project requires lite-dev {requires}, but this is {__version__}; "
-            "install the matching skill version"
+            "install the matching skill version, or run `init --upgrade` "
+            "(crossing a major version also needs `--accept-major`)"
         )
+
+    reviewed = flow_table.get("reviewed", "")
+    if not isinstance(reviewed, str):
+        raise ProfileError("[flow] reviewed must be a version string, e.g. '0.7.0'")
+    reviewed = reviewed.strip()
+    if reviewed and not satisfies(reviewed, requires):
+        raise ProfileError(
+            f"[flow] reviewed {reviewed} is outside requires {requires}; "
+            "set it to a version this range admits"
+        )
+    if not reviewed:
+        # A profile from an older install has no explicit baseline. The range
+        # floor is the honest one: that is the oldest version it admits.
+        reviewed = range_floor(requires)
 
     risk_paths = _string_list(
         reconcile.get("risk_paths", []), "[reconcile] risk_paths"
@@ -1237,5 +1358,6 @@ def load(path: Path | str | None = None) -> Profile:
         extension_info=extension_info,
         extension_detectors=list(extension_detectors),
         requires=requires,
+        reviewed=reviewed,
         id_pattern=id_pattern,
     )

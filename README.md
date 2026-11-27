@@ -137,26 +137,53 @@ Drift that cannot be fixed yet is recorded as one `[[exempt]]` (a check, a path,
 reason, an expiry) — `--plan` prints the shape, and you fill in the reason and
 the date. Profiles from an older install are migrated with
 `flow.py init --upgrade`, which reads the pin it cannot load and proposes the
-current range. Details: [adoption.md](skills/lite-dev/references/adoption.md).
+version contract (`requires` and `reviewed`). Details:
+[adoption.md](skills/lite-dev/references/adoption.md).
 
 Nothing is backfilled: no retroactive work items, no rewritten history. If a
 change cannot wait for an item, the release `--note` records the debt, and
 `reconcile` keeps it visible.
 
+## Version policy
+
+`init` pins two values in `docs/flow/profile.toml`:
+
+```toml
+[flow]
+requires = ">=X.Y.0,<X+1.0"   # hard window: same major, derived by init
+reviewed = "X.Y.Z"            # the exact version this project last reconciled with
+```
+
+The version has three components, and each means a different amount of work:
+
+| Change | Meaning | What happens |
+|---|---|---|
+| Z (patch) | compatible fix | loads; no warning |
+| Y (minor) | may be incompatible | loads; `status`, `check`, and `gate` warn with the CHANGELOG range; `init --upgrade --apply flow.reviewed` records the review |
+| X (major) | contract change | refuses to load; `init --upgrade` shows the breaking sections and the checklist; applying needs `--accept-major` |
+
+`flow.py version` answers what the machine runs, what the project reviewed, and
+which case applies — even when the profile cannot load. The review steps and the
+major checklist are in
+[upgrade.md](skills/lite-dev/references/upgrade.md). The skill ships both
+changelogs so a copied install can read them offline.
+
 ## Repository layout
 
 ```text
 spec/invariants.md          entry point for readers; points at the canonical file
+scripts/check_release.py    version/changelog/template/extension consistency gate
 skills/lite-dev/            the installable skill: everything is inside
   SKILL.md                  entry point: principles, routing, stop conditions, red lines
   profile.template.toml     copy to docs/flow/profile.toml
+  CHANGELOG.md / .zh.md     the skill's release history, bundled for the upgrade review
   references/               invariants + depth, loaded per situation
                             (adoption.md covers introducing the flow;
                             workspace.md covers one root, several repositories)
   templates/                item, design, test report, implementation, release, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
-  scripts/flow.py           init / new / claim / whoami / status / check / design /
-                            design-ready / gate / done / drop / handoff / archive /
+  scripts/flow.py           init / new / claim / whoami / status / version / check /
+                            design / design-ready / gate / done / drop / handoff /
                             unarchive / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
                             gate ledger, handoff, archive, command runner,

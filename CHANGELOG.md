@@ -9,6 +9,48 @@
 - `.github/workflows/tests.yml` also runs `scripts/tests`, so the mirror hook's
   guard against re-entering its own dry run is proven on every push.
 
+## 0.7.0 — 2026-11-27
+
+A skill release is now classified by component: a patch is seamless, a minor
+still loads but names the changelog to read, and a major refuses until the
+checklist is acknowledged. The profile records the version it was last reviewed
+against, and `version` answers what this install is.
+
+### Breaking changes
+
+- `[flow] requires` now spans the whole major line (`>=0.7.0,<1.0`), and
+  `[flow] reviewed` records the exact version the project last reconciled with.
+  A profile pinned to `>=0.6.0,<0.7` no longer loads; `init --upgrade` reads it
+  and proposes both values.
+- A minor (Y) change no longer stops at load: the profile loads and `status`,
+  `check`, and `gate` warn with the CHANGELOG range. A major (X) change still
+  refuses to load, and `init --upgrade --apply` needs `--accept-major` after the
+  checklist in `references/upgrade.md`.
+- The bundled extensions pin `>=0.7.0,<1.0`.
+
+### Added
+
+- `flow.py version [--json]`: the running version, the skill's commit and dirty
+  state when it is a tracked checkout, the project's `requires` / `reviewed`,
+  the drift class, and the next command. It answers even when the profile
+  cannot load.
+- `init --upgrade` classifies the drift and prints the CHANGELOG sections
+  between `reviewed` and the running version (breaking sections marked
+  `[breaking]` for a major). `--accept-major` gates a major; the apply command
+  may name both proposals.
+- `scripts/check_release.py` (+ CI) checks that `__version__`, both changelogs,
+  the skill's bundled copies, the profile template, and the bundled extensions
+  agree; `--sync` regenerates the copies.
+- The skill ships `CHANGELOG.md` and `CHANGELOG.zh.md` so a copied install can
+  show the review text offline.
+
+### Changed
+
+- `compat_range` derives `>=X.Y.0,<X+1.0`; the patch component no longer moves
+  the floor.
+- `status --json` adds `reviewed` and `drift`; `version` is the diagnostic
+  command when a pin refuses to load.
+
 ## 0.6.1 — 2026-11-27
 
 The repository has a second home: a push to GitHub also updates the read-only
