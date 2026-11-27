@@ -37,7 +37,7 @@ Never edit a status by hand.
 
 | Situation | Read | Run |
 |---|---|---|
-| First session in a project | — | `init` (then `status`) |
+| First session, or introducing the skill | [references/adoption.md](references/adoption.md) | `init` → `init --plan` → `init --apply <id>` |
 | Any task starts | [references/clarify.md](references/clarify.md) | `flow.py status` |
 | S, one session | nothing else | `new` → edit → `test-report` → `check` → `gate --level l3 --work <ID>` → `done` |
 | M, one session with a design | [references/one-shot-vs-two-phase.md](references/one-shot-vs-two-phase.md) | `new` → `design` → `design-ready` → implement → `gate` → `done` |
@@ -86,7 +86,7 @@ Phase A is the design session. Phase B is a scheduling session that dispatches
 ## 5. Work item commands
 
 ```bash
-python3 <skill>/scripts/flow.py init [--adopt] [--baseline]
+python3 <skill>/scripts/flow.py init [--plan | --apply <id>] [--baseline] [--upgrade]
 python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
 python3 <skill>/scripts/flow.py status --mine
 python3 <skill>/scripts/flow.py status --stale [--days N]
@@ -110,10 +110,14 @@ python3 <skill>/scripts/flow.py extensions
 - `init` writes what is missing and never replaces a file that exists: the
   profile (this install's version, the detected mainline), the required entry
   documents, and a routing block in `AGENTS.md` (after the title when one
-  exists). Then it runs `check` and prints the next step. `--adopt` prints the
-  ramp for a project that already has code and documents; `--baseline` records
-  `HEAD` as `[reconcile] baseline` on a clean tree, so history before adoption is
-  a baseline and not debt.
+  exists). It then runs `check` and prints the adoption ladder: S0 scaffolded,
+  S1 wired, S2 bounded, S3 anchored, S4 owned, S5 practiced, all derived from
+  files. Only S1 blocks. `--plan` reads the repository and proposes profile
+  values; `--apply <id>` writes one, and refuses if the value it expected
+  changed. `--baseline` records `HEAD` as `[reconcile] baseline` on a clean tree.
+  `--upgrade` reads a profile too old to load and proposes the version pin.
+  `--adopt` is `init` followed by `--plan`. Details:
+  [references/adoption.md](references/adoption.md).
 - `new` allocates `{date}-{type}-{time}` and creates
   `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
   (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
@@ -223,6 +227,10 @@ gate.
 - Levels and commands come from `docs/flow/profile.toml`. Never invent a command.
 - `l1` runs on every batch, `l2` before batch acceptance, `l3` before commit or release.
 - A failing gate is fixed, not argued with. The same failure three times means stop and ask.
+- A level whose command is unconfigured does not run: the value is
+  `!unconfigured`, so `gate --level` refuses that level and points at
+  `init --plan` instead of running a placeholder. A wired cheap level still
+  iterates; `done` refuses because it closes on the strictest level.
 - `gate --work <ID>` validates that item and the profile's required documents,
   then runs the commands. `done` requires a PASS for the item at the strictest
   level in *this* clone; a project-wide run does not name the item. A bare
@@ -291,6 +299,7 @@ per AC, without a recorded full-level gate PASS, or without an identity.
 
 ## References
 
+- [Adoption](references/adoption.md)
 - [Clarify](references/clarify.md)
 - [One-shot vs two-phase](references/one-shot-vs-two-phase.md)
 - [Roles](references/roles.md)

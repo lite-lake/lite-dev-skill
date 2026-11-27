@@ -208,6 +208,36 @@ that teaches people to ignore the file.
   `--takeover --reason`; `done` requires an identity and writes `closed_by`;
   `release`/`reconcile` order records by ancestry and stop on a broken chain.
 
+## 14. Adoption is derived, never a flag
+
+- A project is somewhere on one ladder: S0 scaffolded, S1 wired, S2 bounded,
+  S3 anchored, S4 owned, S5 practiced. Every rung is computed from files; no
+  adoption state is stored, so two clones agree and deleting local output loses
+  nothing.
+- Only S1 blocks. A gate that cannot run is not a gate; every other rung is a
+  visible backlog, because a project must be able to adopt mid-history and still
+  make its next change. Refusal is per level: a wired cheap level still iterates
+  while the strictest level is being wired, and `done` refuses because the level
+  it closes on cannot run.
+- A command that looks declared and is not runnable is a value, not a comment.
+  `!unconfigured` (and the placeholder older templates wrote) is reported by
+  `check` and refused by `gate`; the loader still rejects an empty command as a
+  malformed profile.
+- Detection proposes; a human declares. The profile is executable input, so no
+  detector writes it: `init --plan` reads the repository and `init --apply <id>`
+  writes one proposal. A proposal whose expected value changed is refused whole.
+- Ecosystem detectors are additive. An extension may declare `[[detect]]`
+  markers and commands; core keeps the mechanism and the language-agnostic
+  probes. Nothing may waive a rung, auto-fill a command, or write the profile.
+- A baseline is a commit, not a backfill: history before adoption is recorded as
+  `[reconcile] baseline`, never rewritten into items.
+- **Enforced**: `status` prints the ladder and `--json` carries it; `check`
+  reports a level whose command is unconfigured; `gate` refuses to run such a
+  level and names `init --plan`; `done` refuses when the strictest level is not
+  wired; `init --plan`/`--apply`/`--upgrade` share one proposal engine;
+  `commands.plan` raises on an unconfigured step; `init` never overwrites a file
+  and is safe to re-run.
+
 ## Compatibility
 
 - The profile may set sizes, commands, channels, id format, mainline branch,

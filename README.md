@@ -58,18 +58,23 @@ Three things make it different from a checklist:
    git clone https://github.com/lite-lake/lite-dev-skill.git
    ```
 
-2. **Scaffold the project.**
+2. **Scaffold the project, then wire it.**
 
    ```bash
    python3 <skill>/scripts/flow.py init
+   python3 <skill>/scripts/flow.py init --plan   # proposals, when a runner is recognisable
    ```
 
-   It writes `docs/flow/profile.toml` (pinned to this install's version, with the
-   detected mainline), the required entry documents, and a routing block in
-   `AGENTS.md` (after the title when one exists). Existing files are never
-   replaced, and it ends by running `check` and printing the next step. Edit
-   `commands`, `gate`, and `[design] risk_paths`: the profile is the only file
-   that contains project-specific facts.
+   `init` writes `docs/flow/profile.toml` (pinned to this install's version,
+   with the detected mainline), the required entry documents, and a routing
+   block in `AGENTS.md` (after the title when one exists). Existing files are
+   never replaced. It ends by listing the adoption ladder and the one next
+   command. `--plan` reads the repository — a Makefile target, package scripts,
+   pytest or unittest evidence, `go.mod`, `Cargo.toml`, CI — and proposes
+   profile values; `--apply <id>` writes the one you choose, and editing
+   `[commands]` by hand works too. A new profile's `test` command is the value
+   `!unconfigured`, so `check` says so and `gate` refuses to run until it is
+   wired.
 
 3. **Set your identity.** One value per person, on every machine:
 
@@ -95,20 +100,41 @@ Three things make it different from a checklist:
 
 ## Adopting an existing project
 
-A project that already has code, tests, and opinions does not start over. The
-loop begins at the next change, and the ramp is explicit:
+A project that already has code, tests, and opinions does not start over. It
+enters one derived ladder — no adoption state is stored, so every clone sees the
+same place and re-running a command is always safe:
+
+| Rung | Meaning | Blocks? |
+|---|---|---|
+| S0 | scaffolded: the profile loads | — |
+| S1 | wired: every gate level runs a configured command | **yes** |
+| S2 | bounded: `check` has no errors and no inert switch | no |
+| S3 | anchored: a baseline or a release record exists | no |
+| S4 | owned: this clone resolves an identity | no |
+| S5 | practiced: one item has closed through `done` | no |
+
+Only S1 blocks, so the next change is never held hostage by the rest of the
+backlog. Refusal is per level: a wired `l1` iterates while `l3` is still being
+wired, and `done` waits for the strictest level. `status` prints the ladder and
+the one command that advances it.
 
 1. **`flow.py init --adopt`.** It keeps every file it finds, inserts the routing
-   block into `AGENTS.md`, and reports the existing tree as it is: drift is a
-   warning, a missing required document or a broken link is an error. Silence
-   each real conflict with one `[[exempt]]` (a check, a path, a reason, an
-   expiry) instead of turning a check off for the whole project.
-2. **`flow.py init --baseline` after committing the scaffold.** It records `HEAD`
-   as `[reconcile] baseline`; from then on `reconcile` reports only work that
+   block, reports the existing tree (drift is a warning; a missing required
+   document or a broken link is an error), and prints proposals. Apply the ones
+   you want: `flow.py init --apply commands.test`. Proposals never write
+   themselves, and one whose expected value changed is refused.
+2. **Commit the scaffold, then `flow.py init --baseline`.** It records `HEAD` as
+   `[reconcile] baseline`; from then on `reconcile` reports only work that
    bypassed the flow, never the history that predates adoption.
 3. **Make the first item the one that converges facts.** The register of
    documents with no single authority is the item that pays for the rest: it
    produces the design template the following items copy.
+
+Drift that cannot be fixed yet is recorded as one `[[exempt]]` (a check, a path, a
+reason, an expiry) — `--plan` prints the shape, and you fill in the reason and
+the date. Profiles from an older install are migrated with
+`flow.py init --upgrade`, which reads the pin it cannot load and proposes the
+current range. Details: [adoption.md](skills/lite-dev/references/adoption.md).
 
 Nothing is backfilled: no retroactive work items, no rewritten history. If a
 change cannot wait for an item, the release `--note` records the debt, and
@@ -122,7 +148,8 @@ skills/lite-dev/            the installable skill: everything is inside
   SKILL.md                  entry point: principles, routing, stop conditions, red lines
   profile.template.toml     copy to docs/flow/profile.toml
   references/               invariants + depth, loaded per situation
-                            (workspace.md covers one root, several repositories)
+                            (adoption.md covers introducing the flow;
+                            workspace.md covers one root, several repositories)
   templates/                item, design, test report, implementation, release, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
   scripts/flow.py           init / new / claim / whoami / status / check / design /
@@ -130,7 +157,8 @@ skills/lite-dev/            the installable skill: everything is inside
                             unarchive / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
                             gate ledger, handoff, archive, command runner,
-                            scaffolding, atomic writes and the writer lock
+                            scaffolding, adoption ladder and proposals,
+                            atomic writes and the writer lock
   scripts/tests/            unit tests and an end-to-end acceptance test
 examples/minimal/           a working single-repo project
 examples/workspace/         a working workspace: one root, two repositories
@@ -141,6 +169,7 @@ examples/workspace/         a working workspace: one root, two repositories
 | Deterministic (`flow.py`) | Model |
 |---|---|
 | scaffolding: profile, entry documents, `AGENTS.md` router, mainline | what the project actually is |
+| adoption rungs derived from files; proposals from repository evidence (`plan` → `apply`) | which command the project actually wants |
 | time-ordered id allocation, directory scaffold | clarifying questions, trade-offs |
 | frontmatter / AC / batch parsing | design narrative and diagrams |
 | derived status | batch decomposition |
@@ -278,7 +307,8 @@ Details: [collaboration.md](skills/lite-dev/references/collaboration.md).
 
 ## Status
 
-The current release implements `init` (with `--adopt` and `--baseline`), `new`,
+The current release implements `init` (with `--plan`, `--apply`, `--baseline`,
+and `--upgrade`), `new`,
 `claim`, `whoami`, `status` (with `--stale`), `check`, `design`, `design-ready`,
 `gate`, `done`, `drop`, `handoff`, `archive`, `unarchive`, `release`,
 `reconcile`, `extensions`, the templates
@@ -288,7 +318,9 @@ evidence (`done` refuses any item without a passing report, a recorded full-leve
 gate PASS, and an identity), ordered batch graphs, the risk-path design gate over
 the whole history with worktree/committed provenance, the strictest-level
 announcement `done`/`status`/`init` print, the
-per-clone gate ledger, release bookkeeping/debt separation, three bundled
+per-clone gate ledger, the derived adoption ladder
+(`init --plan`/`--apply` proposals with a value guard), release
+bookkeeping/debt separation, three bundled
 extensions, per-repository commands and gate scoping, per-repository release
 channels, configurable document stores, and two runnable examples (single
 repository and workspace).

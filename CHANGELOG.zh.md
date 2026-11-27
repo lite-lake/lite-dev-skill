@@ -2,6 +2,52 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.5.0 — 2026-11-27
+
+接入（adoption）从一个一次性脚手架，变成一个推导出来的阶段。项目处在一条从文件
+算出来的阶梯上；工具从仓库证据生成 profile 建议；只有 `--apply` 会真正写入。
+
+### 新增
+
+- 接入阶梯（不变量 14）：S0 已生成骨架、S1 已接线、S2 已收敛、S3 已锚定、
+  S4 已认领、S5 已跑通。`status` 会打印（`--json` 也带），且只有 S1 阻塞。
+  不保存任何接入状态，所以每个克隆看到的一致，命令也可以放心重复运行。
+- `init --plan`：只读建议，覆盖 `commands.test`、`commands.lint`、`project.name`、
+  `project.language`、`docs.stores`——来源包括 Makefile、package scripts（按锁文件
+  选 runner）、pytest/unittest 证据、`go.mod`、`Cargo.toml`、Maven、Gradle、
+  Composer、入口文档的文字，以及像记录仓的目录。计划还会报告 CI 入口、兄弟仓库，
+  以及针对真实冲突的、可直接粘贴的 `[[exempt]]` 形状。
+- `init --apply <id>`（可重复）：只写你点名的建议，全有或全无；如果建议预期替换的
+  值已经变了，整次拒绝。
+- `init --upgrade`：读取一个版本钉住、已经无法加载的 profile，建议当前兼容区间。
+- `!unconfigured`：声明了但没接线的门禁命令。`check` 报告，`gate` 拒绝，
+  `commands.plan` 抛错。
+- 扩展里的 `[[detect]]`：`file` / `command` / `note` 标记，由 `init --plan` 提供。
+  `go-service` 自带一条 `go.mod` 的。
+- `references/adoption.md`，以及 `references/invariants.md` 里的不变量 14。
+
+### 变更
+
+- `init` 不再打印散文式 ramp。它打印推导出的阶梯、下一级，以及唯一能推进它的命令。
+  `--adopt` 等于 `init` 之后再 `--plan`。
+- 新 profile 写 `test = "!unconfigured"`，而不是一条运行时才失败的占位 shell 命令；
+  已有 profile 里的旧占位串会被识别为未接线。
+- 声明的门禁级未接线时 `check` 给出 warning；某个级的命令未接线时该级拒绝运行，因此
+  l1 已接线时仍可迭代、l3 继续接线，而 `done` 在最严级别未接线时拒绝。
+- 模板与随附扩展的版本钉住改为 `>=0.5.0,<0.6`。
+
+### 破坏性变更
+
+- 仍带旧占位命令的 profile，现在会由引用它的门禁级拒绝运行——`done` 也会拒绝——
+  直到运行 `init --plan`/`--apply`（或手工改命令）。这正是目的：旧占位串是在
+  `check` 自称 PASS 之后、运行时才以 exit 1 失败。
+- `init --adopt` 的输出从三段 ramp 变成阶梯加建议。解析 ramp 的脚本应改读
+  `status --json`。
+- `init` 成功生成骨架并完成报告时返回 0，即使 `check` 仍报告文档 error：脚手架做完
+  了它承诺的事，S2 属于欠账。`check`、`gate`、`release --record` 仍然是会失败的
+  命令。
+- `status --json` 新增 `adoption` 对象（忽略未知键的读取方无感）。
+
 ## 0.4.2 — 2026-11-27
 
 跨仓库的一次上线现在可以被记录为一次事件；profile 也可以声明「本机不预期检出哪些

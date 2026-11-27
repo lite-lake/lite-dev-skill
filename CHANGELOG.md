@@ -2,6 +2,61 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.5.0 — 2026-11-27
+
+Adoption is a derived phase instead of a one-shot scaffold. A project is
+somewhere on one ladder computed from files, the tool proposes profile values
+from repository evidence, and only `--apply` writes them.
+
+### Added
+
+- The adoption ladder (invariant 14): S0 scaffolded, S1 wired, S2 bounded,
+  S3 anchored, S4 owned, S5 practiced. `status` prints it (`--json` carries it),
+  and only S1 blocks. No adoption state is stored, so every clone agrees and
+  re-running a command is always safe.
+- `init --plan`: read-only proposals for `commands.test`, `commands.lint`,
+  `project.name`, `project.language`, and `docs.stores` — from a Makefile,
+  package scripts (with the lockfile's runner), pytest/unittest evidence,
+  `go.mod`, `Cargo.toml`, Maven, Gradle, Composer, entry-document prose, and
+  record-like directories. The plan also reports CI entrypoints, sibling
+  repositories, and paste-ready `[[exempt]]` shapes for real conflicts.
+- `init --apply <id>` (repeatable): writes the proposals you name, all or
+  nothing, and refuses when the value a proposal expected has changed.
+- `init --upgrade`: reads a profile whose version pin cannot load and proposes
+  the current compatibility range.
+- `!unconfigured`: a gate command that is declared and not wired. `check`
+  reports it, `gate` refuses, `commands.plan` raises.
+- `[[detect]]` in an extension: `file` / `command` / `note` markers that
+  `init --plan` offers. `go-service` ships one for `go.mod`.
+- `references/adoption.md`, and invariant 14 in `references/invariants.md`.
+
+### Changed
+
+- `init` no longer prints a prose ramp. It prints the derived ladder, the next
+  rung, and the one command that advances it. `--adopt` means `init` followed
+  by `--plan`.
+- The scaffolded profile writes `test = "!unconfigured"` instead of a
+  placeholder shell command that failed at run time; the old placeholder string
+  is recognised as unconfigured in existing profiles.
+- `check` warns when a declared gate level is not wired; a level whose command
+  is unconfigured refuses to run, so a wired l1 still iterates while l3 is being
+  wired, and `done` refuses when the strictest level is not wired.
+- The template and bundled extensions pin `>=0.5.0,<0.6`.
+
+### Breaking changes
+
+- A profile that still carries the old placeholder command now has the level
+  that references it refuse to run — and `done` refuse on it — until it runs
+  `init --plan`/`--apply` (or edits the command by hand). That is the point: the
+  old placeholder exited 1 at run time, after a `check` that called itself PASS.
+- `init --adopt` output changed from a three-step ramp to the ladder plus
+  proposals. Scripts that parsed the ramp should read `status --json` instead.
+- `init` now exits 0 when it successfully scaffolds and reports, even if `check`
+  still reports document errors: the scaffold did its job, and S2 is backlog.
+  `check`, `gate`, and `release --record` remain the commands that fail.
+- `status --json` gains an `adoption` object (additive for readers that ignore
+  unknown keys).
+
 ## 0.4.2 — 2026-11-27
 
 A release that spans repositories can now be recorded as one event, and a

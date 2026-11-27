@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 from . import gate_log
-from .profile import Profile, ProfileError
+from .profile import Profile, ProfileError, is_unconfigured
 
 TAIL_LINES = 40
 
@@ -62,6 +62,11 @@ def plan(profile: Profile, level: str, repos: list[str] | None = None) -> Plan:
     skipped: list[str] = []
     unavailable: list[str] = []
     for name in names:
+        if is_unconfigured(profile.commands.get(name, "")):
+            raise ProfileError(
+                f"gate command '{name}' is not wired; set [commands] {name} "
+                "(run flow.py init --plan for a proposal)"
+            )
         repo = profile.command_repo(name)
         if repo is not None and allowed is not None and repo not in allowed:
             skipped.append(name)

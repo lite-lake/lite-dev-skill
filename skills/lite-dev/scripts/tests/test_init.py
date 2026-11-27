@@ -78,8 +78,20 @@ class InitTest(unittest.TestCase):
         # The scaffold pins this install, so every machine runs the same gate.
         self.assertIn('requires = ">=', self.profile_text())
         self.assertIn(flow.__version__, self.profile_text())
-        # Generated entry documents must pass their own zero-fact rule.
-        self.assertIn("0 warning(s)", output)
+        # A new profile declares a command it does not have yet: the sentinel is
+        # a value, and the ladder says so instead of pretending check is green.
+        self.assertIn('test = "!unconfigured"', self.profile_text())
+        self.assertIn("not wired", output)
+        self.assertIn("adoption: 1/6", output)
+        self.assertIn("next S1 wired", output)
+
+    def test_init_leaves_the_gate_refusing_to_run(self) -> None:
+        self.init_repo()
+        self.assertEqual(self.run_flow()[0], 0)
+        code, output, _ = self.run_command("gate", "--level", "l1")
+        self.assertEqual(code, 2, output)
+        self.assertIn("gate l1 is not wired", output)
+        self.assertIn("init --plan", output)
 
     def test_init_is_idempotent(self) -> None:
         self.init_repo()
@@ -128,7 +140,7 @@ class InitTest(unittest.TestCase):
         code, output, _ = self.run_flow("--adopt")
         self.assertEqual(code, 0, output)
         self.assertIn("pins a version (Node 18.2.0)", output)
-        self.assertIn("adopt:", output)
+        self.assertIn("plan:", output)
 
     def test_init_honours_the_language(self) -> None:
         self.init_repo()
@@ -137,7 +149,7 @@ class InitTest(unittest.TestCase):
         self.assertIn('language = "zh"', self.profile_text())
         self.assertIn("本项目使用 lite-dev", (self.root / "AGENTS.md").read_text())
         self.assertIn("文档", (self.root / "docs/README.md").read_text())
-        self.assertIn("0 warning(s)", output)
+        self.assertIn("adoption: 1/6", output)
 
     def test_init_works_without_git(self) -> None:
         code, output, _ = self.run_flow()

@@ -2,7 +2,7 @@
 """lite-dev flow tool.
 
 Usage (from the project root):
-    python3 <skill>/scripts/flow.py init [--adopt] [--baseline]
+    python3 <skill>/scripts/flow.py init [--plan | --apply ID] [--baseline] [--upgrade]
     python3 <skill>/scripts/flow.py status [--mine] [--stale [--days N]]
     python3 <skill>/scripts/flow.py new --title "Export CSV" --type REQ --size M
     python3 <skill>/scripts/flow.py check [--work <ID>]
@@ -49,6 +49,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from flowlib import (  # noqa: E402
     __version__,
+    adopt,
     archive,
     artifacts,
     checks,
@@ -76,6 +77,34 @@ from flowlib.profile import (  # noqa: E402
 SKILL_DIR = SCRIPTS.parent
 TEMPLATE = SKILL_DIR / "templates" / "item.md"
 DESIGN_TEMPLATE = SKILL_DIR / "templates" / "design.md"
+
+
+def _flow_invocation() -> str:
+    """How this install tells a human to run the next step."""
+    return f"python3 {SKILL_DIR / 'scripts' / 'flow.py'}"
+
+
+def _wiring_refusal(profile, *, level: str | None = None) -> int | None:
+    """The one hard adoption gate: a command that is declared and not wired.
+
+    With a level, only that level is judged: a project may wire l1 and l2 before
+    it wires l3, and cheap iteration should not wait. Without one (`done`, which
+    needs the strictest level), every declared level is judged.
+    """
+    if level:
+        wiring = profile_mod.level_wiring_problems(profile, level)
+        what = f"gate {level}"
+    else:
+        wiring = profile_mod.wiring_problems(profile)
+        what = "the gate (adoption S1 is not done)"
+    if not wiring:
+        return None
+    print(f"FAIL: {what} is not wired")
+    for problem in wiring:
+        print(f"  - {problem}")
+    print(f"next: {_flow_invocation()} init --plan")
+    return 2
+
 
 STATUS_ORDER = {
     "need-clarify": 0,
@@ -389,6 +418,9 @@ def _mentions(repo_root: Path, item_id: str) -> bool:
 def cmd_status(args) -> int:
     profile = _load_profile(args)
     items = artifacts.all_items(profile)
+    # The ladder is project-level: filters below narrow the item table, not the
+    # question "has this project adopted the flow yet".
+    ladder_items = items + artifacts.archived_items(profile)
     mine = ""
     if args.mine:
         mine = identity.resolve_for(profile, None)
@@ -423,6 +455,7 @@ def cmd_status(args) -> int:
     stale_note = ""
     if args.stale:
         stale_rows, stale_note = _stale_rows(profile, items, args.days)
+    ladder = adopt.ladder(profile, items=ladder_items)
 
     if args.json:
         payload = {
@@ -430,6 +463,16 @@ def cmd_status(args) -> int:
             "version": __version__,
             "profile": str(profile.path.relative_to(profile.root)),
             "checkout": checkout,
+            "adoption": {
+                "done": ladder.done,
+                "total": len(ladder.rungs),
+                "current": ladder.current.id if ladder.current else None,
+                "next": ladder.current.command if ladder.current else None,
+                "rungs": [
+                    {"id": rung.id, "name": rung.name, "done": rung.done}
+                    for rung in ladder.rungs
+                ],
+            },
             "repos": [
                 {**state, "control": repo.control}
                 for state, repo in zip(repo_states, profile.workspace_repos)
@@ -508,6 +551,9 @@ def cmd_status(args) -> int:
             )
         else:
             print(f"  checkout {label} {checkout['head']} (no upstream; this clone only)")
+
+    for line in adopt.render_ladder(ladder, indent="  "):
+        print(line)
 
     if not items:
         print("  no work items" if not mine else f"  no items for {mine}")
@@ -674,6 +720,12 @@ def cmd_design(args) -> int:
 
 def cmd_gate(args) -> int:
     profile = _load_profile(args)
+    # A level whose commands are not wired is not a gate. Refuse before the
+    # static checks so the message is the wiring problem, not a shell error from
+    # an unconfigured placeholder.
+    refusal = _wiring_refusal(profile, level=args.level)
+    if refusal is not None:
+        return refusal
     errors, warnings = checks.check_project(profile, work=args.work)
     item = None
     if args.work:
@@ -752,6 +804,11 @@ def _mention_evidence(path: Path) -> None:
 
 def cmd_done(args) -> int:
     profile = _load_profile(args)
+    # Closing rides on the strictest level, so that is the level that must be
+    # wired; a lower unwired level is caught when it is next run.
+    refusal = _wiring_refusal(profile, level=profile.full_level)
+    if refusal is not None:
+        return refusal
     item = artifacts.find_item(profile, args.id)
     closer = identity.try_resolve_for(profile, args.owner)
 
@@ -1400,11 +1457,15 @@ def cmd_release(args) -> int:
 
 
 def cmd_init(args) -> int:
-    """Scaffold the profile, the entry documents, and the routing block.
+    """Scaffold the project, then report where adoption stands.
 
-    Without `--root`, an existing profile wins over the working directory: a
-    workspace is entered from any of its repositories, and scaffolding a second
-    flow inside a subdirectory would split the item store in two.
+    Scaffolding is additive and never overwrites. The adoption ladder is derived
+    from files, not stored, so re-running this command is always safe and always
+    shows the truth. `--plan` reads the repository and proposes profile values;
+    `--apply <id>` is the only path that writes one. Without `--root`, an
+    existing profile wins over the working directory: a workspace is entered
+    from any of its repositories, and scaffolding a second flow inside a
+    subdirectory would split the item store in two.
     """
     if args.root:
         root = Path(args.root).resolve()
@@ -1421,9 +1482,39 @@ def cmd_init(args) -> int:
             try:
                 root = profile_mod.load(existing).root
             except ProfileError as exc:
-                print(f"error: {exc}", file=sys.stderr)
-                return 2
+                if not args.upgrade:
+                    print(f"error: {exc}", file=sys.stderr)
+                    return 2
+                # An old version pin fails to load; --upgrade still needs a root.
+                root = profile_mod.conventional_root(existing)
             print(f"note:    using the existing profile at {existing} (root {root})")
+
+    profile_path = root / scaffold.PROFILE_REL
+
+    if args.upgrade:
+        if args.baseline:
+            print(
+                "error: --baseline runs after the upgrade; commit, then run "
+                "init --baseline",
+                file=sys.stderr,
+            )
+            return 2
+        return _cmd_upgrade(profile_path, args)
+
+    if args.plan:
+        if not profile_path.is_file():
+            print(
+                f"error: no profile at {profile_path}; run `flow.py init` first "
+                "(it scaffolds without overwriting anything)",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            profile = profile_mod.load(profile_path)
+        except ProfileError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        return _report_adoption(profile, plan=True, apply_ids=[])
 
     result = scaffold.apply(
         root, version=__version__, language=args.language, baseline=args.baseline
@@ -1440,13 +1531,45 @@ def cmd_init(args) -> int:
     for note in result.notes:
         print(f"note:    {note}")
 
-    profile = profile_mod.load(root / scaffold.PROFILE_REL)
-    errors, warnings = checks.check_project(profile)
+    profile = profile_mod.load(profile_path)
+    return _report_adoption(
+        profile,
+        plan=bool(args.adopt or args.apply),
+        apply_ids=list(args.apply or []),
+    )
+
+
+def _print_check_line(errors: list[str], warnings: list[str]) -> None:
     if errors:
         print(f"check: FAIL — {len(errors)} error(s), {len(warnings)} warning(s); errors block")
     else:
         print(f"check: PASS — no errors ({len(warnings)} warning(s); warnings do not block)")
     _print_issues(errors, warnings)
+
+
+def _rewrite_agents_language(profile) -> None:
+    """A profile that says `zh` and an English router state one fact twice."""
+    for name in profile.required_docs:
+        if Path(name).name.lower() != "agents.md":
+            continue
+        path = profile.root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        updated, changed = scaffold.replace_agents_block(text, profile.language)
+        if not changed or updated == text:
+            continue
+        fsio.atomic_write_text(path, updated)
+        print(
+            f"note:    rewrote the lite-dev routing block in {name} "
+            f"({profile.language})"
+        )
+
+
+def _report_adoption(profile, *, plan: bool, apply_ids: list[str]) -> int:
+    """Check, ladder, then proposals. The only writer is an explicit --apply."""
+    errors, warnings = checks.check_project(profile)
+    _print_check_line(errors, warnings)
 
     advisory = checks.full_level_warning(profile)
     if advisory:
@@ -1472,27 +1595,90 @@ def cmd_init(args) -> int:
     else:
         print(f"identity: {resolved[0]} (from {resolved[1]})")
 
-    if args.adopt:
-        print(
-            "\nadopt:\n"
-            "  1. Keep the existing tree. Drift is a warning; a missing required\n"
-            "     document or a broken link is an error. Silence each real conflict\n"
-            '     with [[exempt]] (check = "links" | "index" | "absolute" |\n'
-            '     "escape" | "zero_fact", path, reason, until) instead of turning a\n'
-            "     check off for the project. Name requirement and asset stores in\n"
-            '     [docs] stores = [...] rather than exempting them one by one.\n'
-            "  2. Commit the scaffold, then `flow.py init --baseline` so only work\n"
-            "     after adoption is debt; `flow.py reconcile` never blocks.\n"
-            "  3. Make the first item the one that converges the facts with no single\n"
-            "     authority, not a feature."
-        )
-    else:
+    ladder = adopt.ladder(profile, check_errors=errors)
+    for line in adopt.render_ladder(ladder, invocation=_flow_invocation()):
+        print(line)
+
+    # `init` reports; it does not judge. A pre-existing broken link is S2 debt,
+    # and failing here would make the scaffold look broken while the command did
+    # exactly what it promised. `check` and `gate` are the commands that fail.
+    if plan:
+        proposal_plan = adopt.plan(profile, check_errors=errors)
+        if apply_ids:
+            try:
+                applied = adopt.apply(
+                    profile.path, proposal_plan.proposals, apply_ids, root=profile.root
+                )
+            except (FlowError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            for proposal_id in applied:
+                print(f"applied: {proposal_id}")
+            profile = profile_mod.load(profile.path)
+            if "project.language" in applied:
+                _rewrite_agents_language(profile)
+            errors, warnings = checks.check_project(profile)
+            _print_check_line(errors, warnings)
+            ladder = adopt.ladder(profile, check_errors=errors)
+            for line in adopt.render_ladder(ladder, invocation=_flow_invocation()):
+                print(line)
+            proposal_plan = adopt.plan(profile, check_errors=errors)
+            if proposal_plan.proposals:
+                print("\nremaining:")
+                for line in adopt.render_plan(proposal_plan):
+                    print(line)
+        else:
+            print()
+            for line in adopt.render_plan(proposal_plan):
+                print(line)
+
+    if not profile_mod.wiring_problems(profile):
         print(
             "\nnext:\n"
-            f'  {sys.executable} {SKILL_DIR / "scripts" / "flow.py"} new '
-            '--title "..." --type REQ --size S'
+            f'  {_flow_invocation()} new --title "..." --type REQ --size S'
         )
-    return 0 if not errors else 1
+    return 0
+
+
+def _cmd_upgrade(profile_path: Path, args) -> int:
+    """Propose (and optionally apply) the version-pin migration.
+
+    This path reads the raw profile on purpose: a pin from an older install
+    fails to load, and "install a different skill" is not a migration.
+    """
+    if not profile_path.is_file():
+        print(f"error: no profile at {profile_path}; run `flow.py init` first", file=sys.stderr)
+        return 2
+    proposal_plan = adopt.upgrade_plan(profile_path)
+    print("upgrade:")
+    for line in adopt.render_plan(proposal_plan):
+        print(line)
+
+    if args.apply:
+        try:
+            applied = adopt.apply(
+                profile_path,
+                proposal_plan.proposals,
+                args.apply,
+                root=profile_mod.conventional_root(profile_path),
+            )
+        except (FlowError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        for proposal_id in applied:
+            print(f"applied: {proposal_id}")
+        proposal_plan = adopt.upgrade_plan(profile_path)
+        if proposal_plan.proposals:
+            print("\nremaining:")
+            for line in adopt.render_plan(proposal_plan):
+                print(line)
+
+    try:
+        profile = profile_mod.load(profile_path)
+    except ProfileError as exc:
+        print(f"note:    profile still does not load: {exc}")
+        return 1 if args.apply else 0
+    return _report_adoption(profile, plan=False, apply_ids=[])
 
 
 def cmd_reconcile(args) -> int:
@@ -1628,6 +1814,8 @@ def cmd_extensions(args) -> int:
             print(f"  docs required += {', '.join(info['docs'])}")
         if info.get("risk_paths"):
             print(f"  reconcile risk paths += {', '.join(info['risk_paths'])}")
+        for detector in info.get("detect", []):
+            print(f"  detect {detector['file']} -> {detector['command']}")
     return 0
 
 
@@ -1647,7 +1835,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     init_parser = subparsers.add_parser(
-        "init", help="scaffold the profile, entry documents, and the AGENTS.md router"
+        "init", help="scaffold the project, then report the adoption ladder"
     )
     init_parser.add_argument(
         "--root", help="project root (defaults to the working directory)"
@@ -1658,7 +1846,23 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "--adopt",
         action="store_true",
-        help="print the ramp for a project that already has code and documents",
+        help="scaffold, then print the adoption plan (the old ramp, now derived)",
+    )
+    init_parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="read-only: propose profile values from the repository",
+    )
+    init_parser.add_argument(
+        "--apply",
+        action="append",
+        metavar="ID",
+        help="write one proposal (repeatable; run --plan to see the ids)",
+    )
+    init_parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="propose a version-pin migration for this install",
     )
     init_parser.add_argument(
         "--baseline",

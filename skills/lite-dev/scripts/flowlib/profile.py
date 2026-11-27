@@ -25,7 +25,23 @@ MODES = ("one-shot", "two-phase")
 LEVELS = ("l1", "l2", "l3")
 TIME_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"
 TIME_LEN = 6
-EXTENSION_KEYS = {"name", "version", "description", "requires", "commands", "gate", "docs", "reconcile"}
+EXTENSION_KEYS = {
+    "name",
+    "version",
+    "description",
+    "requires",
+    "commands",
+    "gate",
+    "docs",
+    "reconcile",
+    "detect",
+}
+# A gate command that is declared but not wired. It is a value, not a comment:
+# `check` reports it and `gate` refuses to run it, so a scaffolded profile cannot
+# look like a working one by accident. The marker is what older templates used;
+# recognising it stops an adopted project from keeping a silent placeholder.
+UNCONFIGURED = "!unconfigured"
+UNCONFIGURED_MARKERS = ("configure [commands]",)
 # Checks an exemption may silence. Evidence is deliberately absent: an exemption
 # records drift, it does not waive an invariant.
 EXEMPT_CHECKS = (
@@ -143,6 +159,7 @@ class Profile:
     extensions_enabled: list[str]
     extensions_dir: str
     extension_info: list[dict]
+    extension_detectors: list[dict]
     requires: str
     id_pattern: re.Pattern
 
@@ -231,6 +248,67 @@ class Profile:
             if self.gate.get(level):
                 return level
         return None
+
+
+def is_unconfigured(command: str) -> bool:
+    """A declared but unwired command. Empty is one too, for hand-written profiles.
+
+    The loader still rejects an empty string as a malformed profile; this is the
+    predicate for a command that is syntactically fine and functionally absent.
+    """
+    text = (command or "").strip()
+    return not text or text == UNCONFIGURED or any(
+        marker in text for marker in UNCONFIGURED_MARKERS
+    )
+
+
+def _unconfigured_message(level: str, name: str) -> str:
+    return (
+        f"[gate] {level} command '{name}' is not wired; set "
+        f"[commands] {name} to the real command "
+        f"(or run flow.py init --plan)"
+    )
+
+
+def level_wiring_problems(profile: Profile, level: str) -> list[str]:
+    """Why one declared level cannot run. Undeclared levels are not inspected."""
+    if level not in profile.gate:
+        return []
+    steps = profile.gate[level]
+    if not steps:
+        return [f"[gate] {level} has no steps; add a command or remove the level"]
+    return [
+        _unconfigured_message(level, name)
+        for name in steps
+        if is_unconfigured(profile.commands.get(name, ""))
+    ]
+
+
+def wiring_problems(profile: Profile) -> list[str]:
+    """Why adoption S1 is not done, one actionable line per command.
+
+    Only commands a declared level actually runs matter: an unconfigured command
+    nobody references costs nothing. A level with no steps is a wiring problem
+    too — it looks defined in the file and does nothing at run time.
+    """
+    problems: list[str] = []
+    reported: set[str] = set()
+    for level in LEVELS:
+        if level not in profile.gate:
+            continue
+        steps = profile.gate[level]
+        if not steps:
+            problems.append(
+                f"[gate] {level} has no steps; add a command or remove the level"
+            )
+            continue
+        for name in steps:
+            if name in reported:
+                continue
+            if is_unconfigured(profile.commands.get(name, "")):
+                problems.append(_unconfigured_message(level, name))
+                reported.add(name)
+    return problems
 
 
 def find_profile(start: Path | None = None) -> Path:
@@ -665,6 +743,7 @@ def _merge_extension(
     gate: dict[str, list[str]],
     required_docs: list[str],
     risk_paths: list[str],
+    detectors: list[dict],
 ) -> dict:
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -677,7 +756,7 @@ def _merge_extension(
     if unknown:
         raise ProfileError(
             f"extension '{name}': unknown key(s) {', '.join(sorted(unknown))}; "
-            "extensions may only add commands, gate steps, docs and risk paths"
+            "extensions may only add commands, gate steps, docs, risk paths and detectors"
         )
     if raw.get("name") != name:
         raise ProfileError(f"extension '{name}': name in extension.toml must match the directory")
@@ -735,6 +814,36 @@ def _merge_extension(
         if risk not in risk_paths:
             risk_paths.append(risk)
 
+    # Detectors only propose. They name an ecosystem marker file and the command
+    # that follows from it; nothing is written without `init --apply`.
+    ext_detect = raw.get("detect") or []
+    if not isinstance(ext_detect, list):
+        raise ProfileError(f"extension '{name}': [[detect]] must be an array of tables")
+    kept_detect: list[dict] = []
+    for index, entry in enumerate(ext_detect, 1):
+        where = f"extension '{name}': [[detect]] #{index}"
+        if not isinstance(entry, dict):
+            raise ProfileError(f"{where} must be a table")
+        _allow_keys(entry, ("file", "command", "note"), where)
+        marker = entry.get("file")
+        if not isinstance(marker, str) or not marker.strip() or Path(marker).is_absolute():
+            raise ProfileError(f"{where}: 'file' must be a relative path")
+        command = entry.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ProfileError(f"{where}: 'command' must be non-empty")
+        note = entry.get("note", "")
+        if not isinstance(note, str):
+            raise ProfileError(f"{where}: 'note' must be a string")
+        detector = {
+            "file": marker.strip().strip("/"),
+            "command": command.strip(),
+            "note": note.strip(),
+            "name": name,
+            "source": source,
+        }
+        kept_detect.append(detector)
+        detectors.append(detector)
+
     return {
         "name": name,
         "version": str(raw.get("version", "") or ""),
@@ -743,6 +852,7 @@ def _merge_extension(
         "source": source,
         "gate": {level: list(steps) for level, steps in ext_gate.items()},
         "commands": sorted(ext_commands),
+        "detect": list(kept_detect),
         "docs": list(
             dict.fromkeys(
                 item
@@ -770,7 +880,7 @@ def _apply_extensions(
     gate: dict[str, list[str]],
     required_docs: list[str],
     risk_paths: list[str],
-) -> tuple[list[str], str, list[dict]]:
+) -> tuple[list[str], str, list[dict], list[dict]]:
     if not isinstance(table, dict):
         raise ProfileError("[extensions] must be a table")
     enabled = _string_list(table.get("enabled", []), "[extensions] enabled")
@@ -782,6 +892,7 @@ def _apply_extensions(
 
     bundled_root = Path(__file__).resolve().parents[2] / "extensions"
     info: list[dict] = []
+    detectors: list[dict] = []
     for name in dict.fromkeys(enabled):
         project_path = root / extensions_dir / name / "extension.toml"
         bundled_path = bundled_root / name / "extension.toml"
@@ -799,9 +910,11 @@ def _apply_extensions(
                 f"extension '{name}' not found in {extensions_dir}/ or the skill's extensions/"
             )
         info.append(
-            _merge_extension(name, path, source, commands, gate, required_docs, risk_paths)
+            _merge_extension(
+                name, path, source, commands, gate, required_docs, risk_paths, detectors
+            )
         )
-    return enabled, extensions_dir, info
+    return enabled, extensions_dir, info, detectors
 
 
 def load(path: Path | str | None = None) -> Profile:
@@ -1045,8 +1158,8 @@ def load(path: Path | str | None = None) -> Profile:
     release_channels = [entry.name for entry in channels]
     release_groups = _parse_groups(release, channels)
 
-    extensions_enabled, extensions_dir, extension_info = _apply_extensions(
-        root, extensions, commands, gate, required_docs, risk_paths
+    extensions_enabled, extensions_dir, extension_info, extension_detectors = (
+        _apply_extensions(root, extensions, commands, gate, required_docs, risk_paths)
     )
 
     if not commands:
@@ -1122,6 +1235,7 @@ def load(path: Path | str | None = None) -> Profile:
         extensions_enabled=list(extensions_enabled),
         extensions_dir=extensions_dir,
         extension_info=extension_info,
+        extension_detectors=list(extension_detectors),
         requires=requires,
         id_pattern=id_pattern,
     )

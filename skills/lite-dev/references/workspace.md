@@ -182,7 +182,10 @@ holding the name on that machine. `user.name` is still never used, and
    repositories a change touches, not with the size of the workspace.
 5. Bind channels only after `check` is clean.
 6. `init --baseline` in the control repository, so history before adoption is a
-   baseline and not debt.
+   baseline and not debt. `status` prints the adoption ladder; `init --plan`
+   proposes the workspace-level commands it can recognise, but `root`, `control`,
+   and the `[[workspace.repo]]` list stay a declaration — a workspace is a fact
+   about the project, not something a directory scan should guess.
 
 ## What it does not do
 

@@ -7,7 +7,7 @@ from datetime import date
 
 from . import artifacts, docs, git, identity
 from .errors import FlowError
-from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile
+from .profile import MODES, PRIORITIES, SIZES, TYPES, Profile, wiring_problems
 
 DESIGN_SECTIONS = (
     "Handoff",
@@ -847,6 +847,9 @@ def check_project(
     for relative in profile.required_docs:
         if not (profile.root / relative).exists():
             errors.append(f"missing required document: {relative}")
+
+    for problem in wiring_problems(profile):
+        warnings.append(f"{problem} (adoption S1)")
 
     if work is None:
         warnings.extend(repo_warnings(profile))

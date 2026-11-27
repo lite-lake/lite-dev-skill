@@ -43,7 +43,7 @@ work_dir = "docs/work"
 [flow]
 # Required. Pin the lite-dev version this project targets; an incompatible
 # install is a profile error, so every machine runs the same gate.
-requires = ">=0.4.0,<0.5"
+requires = ">=0.5.0,<0.6"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of
@@ -85,7 +85,13 @@ risk_gate = "warn"
 [commands]
 # Any shell command run from the project root. This file is executable input:
 # treat it as trusted project configuration, not as data from an untrusted source.
-test = "echo 'configure [commands] test in docs/flow/profile.toml' >&2; exit 1"
+#
+# `!unconfigured` is a value, not a comment: `check` reports it and `gate`
+# refuses to run it, so a scaffold cannot look wired by accident.
+# `init --plan` proposes a command from the repository (Makefile, package.json,
+# pyproject.toml, go.mod, Cargo.toml) and reports CI entrypoints; `init --apply
+# <id>` writes the one you choose. Nothing is written without that confirmation.
+test = "!unconfigured"
 # lint = "your linter"
 # unit = "your unit test command"
 # e2e = "your end-to-end command"

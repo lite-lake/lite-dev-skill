@@ -159,6 +159,24 @@ def with_agents_block(text: str, language: str = "en") -> tuple[str, str]:
     return agents_block(language) + "\n" + text, "routing block prepended"
 
 
+def replace_agents_block(text: str, language: str = "en") -> tuple[str, bool]:
+    """Rewrite the marked block in place; everything around it is untouched.
+
+    Used when `project.language` is applied after the scaffold: a profile that
+    says `zh` and a routing block in English are two statements of one fact.
+    A file without the markers is not an AGENTS.md this tool wrote; leave it.
+    """
+    start = text.find(AGENTS_BEGIN)
+    end = text.find(AGENTS_END)
+    if start < 0 or end < start:
+        return text, False
+    block = agents_block(language)
+    rest = text[end + len(AGENTS_END) :]
+    if rest.startswith("\n") and block.endswith("\n"):
+        rest = rest[1:]
+    return text[:start] + block + rest, True
+
+
 def readme_text(name: str, language: str = "en") -> str:
     if language == "zh":
         return (

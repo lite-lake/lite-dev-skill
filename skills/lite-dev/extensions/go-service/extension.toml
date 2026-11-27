@@ -1,7 +1,7 @@
 name = "go-service"
 version = "1.0.0"
 description = "Go service: build, vet, and test with the standard toolchain."
-requires = ">=0.4.0,<0.5"
+requires = ">=0.5.0,<0.6"
 
 [commands]
 go_build = "go build -o \"$(mktemp -d)/\" ./..."
@@ -15,3 +15,10 @@ l3 = ["go_vet"]
 
 [reconcile]
 risk_paths = ["migrations/", "internal/auth/"]
+
+# Adoption proposals, not project facts: `init --plan` offers the command when
+# the marker file exists, and only `init --apply` writes it.
+[[detect]]
+file = "go.mod"
+command = "go test ./..."
+note = "go.mod (go-service extension)"

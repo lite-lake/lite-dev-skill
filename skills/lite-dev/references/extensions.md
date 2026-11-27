@@ -22,7 +22,7 @@ keep exactly one copy.
 name = "go-service"
 version = "1.0.0"
 description = "Go service commands"
-requires = ">=0.4.0,<0.5"
+requires = ">=0.5.0,<0.6"
 
 [commands]
 go_build = "go build ./..."
@@ -41,9 +41,13 @@ risk_paths = ["migrations/"]
   `>=0.2.0,<0.3.0`; a full `X.Y.Z` means exactly that version.
 - `version` is the extension's own version.
 - Allowed keys only: `name`, `version`, `description`, `requires`, `commands`,
-  `gate`, `docs`, `reconcile`. Anything else is an error, so a typo cannot
-  silently do nothing.
+  `gate`, `docs`, `reconcile`, `detect`. Anything else is an error, so a typo
+  cannot silently do nothing.
 - `[docs]` may only contain `required`; `[reconcile]` may only contain `risk_paths`.
+- `[[detect]]` proposes adoption values, it does not merge into the profile:
+  `file` is a marker path, `command` is what follows from it, `note` replaces the
+  evidence line. `init --plan` offers it when the marker exists; only
+  `init --apply` writes. See [adoption](adoption.md).
 - A command may contain `{skill}`. The loader replaces it with the installed
   skill directory (shell-quoted), which is how a bundled extension runs a script
   it ships next to its `extension.toml` without hardcoding a machine path.
@@ -56,6 +60,7 @@ risk_paths = ["migrations/"]
 | `[gate]` | steps appended to the level, deduplicated; level must be l1/l2/l3 |
 | `[docs] required` | appended, deduplicated |
 | `[reconcile] risk_paths` | appended, deduplicated |
+| `[[detect]]` | offered by `init --plan`; never written without `--apply` |
 
 Additions only. An extension cannot replace a command, change a gate level,
 remove a required document, alter the state machine, or waive an invariant.
