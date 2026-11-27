@@ -7,7 +7,7 @@ work_dir = "docs/work"
 
 [flow]
 requires = ">=0.7.0,<1.0"
-reviewed = "0.7.0"
+reviewed = "0.7.1"
 
 [id]
 format = "{date}-{type}-{time}"

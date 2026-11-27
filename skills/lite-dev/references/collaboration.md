@@ -14,13 +14,14 @@ git config --global lite-dev.owner "Your Name"
 ```
 
 `new`, `claim`, and `release --record` take `--owner` (or `--by`), then fall
-back to `$LITE_DEV_OWNER`, then to that config. `done` has no flag: it reads the
-environment and the config. There is no fallback to `user.name`: a wrong owner
-is worse than a clear error. The owner is written into `item.md`, so teammates
-and `status --mine` see it.
+back to `$LITE_DEV_OWNER`, then to that config, then to `[project] owner_file`
+when the root is not a repository. `done` has no flag: it reads the environment,
+the config, and the owner file. There is no fallback to `user.name`: a wrong
+owner is worse than a clear error. The owner is written into `item.md`, so
+teammates and `status --mine` see it.
 
-`flow.py whoami` prints the identity that will be used and which of the three
-sources it came from. Run it after setting up a second machine; an env var that
+`flow.py whoami` prints the identity that will be used and which source it came
+from. Run it after setting up a second machine; an env var that
 disagrees with the global config is the usual way one person becomes two owners.
 
 A team can pin the canonical spellings:
@@ -90,9 +91,10 @@ will conflict, and git will ask you to decide which facts to keep.
 teammate's broken WIP item does not block your batch. A bare `check` and
 `release --record` validate the whole project; that is the integration point.
 
-Pin `[flow] requires` and `[flow] reviewed` in the profile. They are required:
-a machine outside the window stops with a profile error, and a machine on a
-different minor still loads but warns. That is why a teammate sees the same
+`[flow] requires` is required. Pin `[flow] reviewed` too, to the exact version
+the project was last reconciled with; an older profile without it falls back to
+the range floor. A machine outside the window stops with a profile error, and a
+machine on a different minor still loads but warns. That is why a teammate sees the same
 CHANGELOG range you reviewed, instead of a gate that quietly changed rules.
 
 ## Releases

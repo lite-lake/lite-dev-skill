@@ -97,19 +97,15 @@ MAJOR_CHECKLIST = (
 )
 
 
-def _wiring_refusal(profile, *, level: str | None = None) -> int | None:
+def _wiring_refusal(profile, *, level: str) -> int | None:
     """The one hard adoption gate: a command that is declared and not wired.
 
-    With a level, only that level is judged: a project may wire l1 and l2 before
-    it wires l3, and cheap iteration should not wait. Without one (`done`, which
-    needs the strictest level), every declared level is judged.
+    Only the requested level is judged: a project may wire l1 and l2 before it
+    wires l3, and cheap iteration should not wait. `done` passes the strictest
+    defined level, which is the level it closes on.
     """
-    if level:
-        wiring = profile_mod.level_wiring_problems(profile, level)
-        what = f"gate {level}"
-    else:
-        wiring = profile_mod.wiring_problems(profile)
-        what = "the gate (adoption S1 is not done)"
+    wiring = profile_mod.level_wiring_problems(profile, level)
+    what = f"gate {level}"
     if not wiring:
         return None
     print(f"FAIL: {what} is not wired")

@@ -33,8 +33,9 @@ In `item.md`:
   - ...
 ```
 
-`flow.py` reads the `Status` line; `check` and `design-ready` refuse an
-unclarified item. If nothing needs asking, write `None` and still set
+`flow.py` reads the `Status` line; `design-ready` refuses an unclarified item,
+and so does `check` once a `design.md` already exists. If nothing needs asking,
+write `None` and still set
 `clarified`: the status means "the ambiguity was resolved", not "a meeting happened".
 
 ## Signs you are doing it wrong

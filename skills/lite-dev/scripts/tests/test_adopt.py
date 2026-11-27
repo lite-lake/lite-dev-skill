@@ -13,7 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
 import flow  # noqa: E402
-from flowlib import adopt, artifacts, checks  # noqa: E402
+from flowlib import adopt, artifacts, checks, scaffold  # noqa: E402
 from flowlib import profile as profile_mod  # noqa: E402
 from flowlib.errors import FlowError  # noqa: E402
 
@@ -363,7 +363,7 @@ class UpgradeTest(Base):
         plan = adopt.upgrade_plan(self.profile_path)
         proposal = plan.find("flow.requires")
         self.assertIsNotNone(proposal)
-        self.assertIn(flow.__version__, proposal.value)
+        self.assertEqual(proposal.value, scaffold.compat_range(flow.__version__))
         adopt.apply(self.profile_path, plan.proposals, ["flow.requires"])
         self.assertEqual(self.load().requires, proposal.value)
 

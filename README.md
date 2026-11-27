@@ -180,11 +180,12 @@ skills/lite-dev/            the installable skill: everything is inside
   references/               invariants + depth, loaded per situation
                             (adoption.md covers introducing the flow;
                             workspace.md covers one root, several repositories)
-  templates/                item, design, test report, implementation, release, retro, decision
+  templates/                item, design, test report, implementation, release,
+                            release group, retro, decision
   extensions/               bundled add-ons (go-service, security-scan, deploy-lane)
   scripts/flow.py           init / new / claim / whoami / status / version / check /
                             design / design-ready / gate / done / drop / handoff /
-                            unarchive / release / reconcile / extensions
+                            archive / unarchive / release / reconcile / extensions
   scripts/flowlib/          profile, identity, artifacts, checks, document hygiene,
                             gate ledger, handoff, archive, command runner,
                             scaffolding, adoption ladder and proposals,
@@ -241,7 +242,7 @@ flow.py extensions                     # what each add-on contributes
 dirty tree, a branch other than `release.mainline`, a clone behind its upstream,
 an empty rollback, a source that does not descend from the recorded tip, or
 commits without work items that are not written into `--note`. Commits that only
-add release records or archive an item are bookkeeping, not debt. With
+touch the profile, work items, or release records are bookkeeping, not debt. With
 `[release] confirm_risk_paths`, a range that touches `[design] risk_paths` also
 needs `--confirm`; `--confirmed-by` names the authorizer when it is not the
 recorder. The record keeps the human's words, not only the rollback.
@@ -258,7 +259,9 @@ non-ignored files), `deploy-lane` (validates deployment manifests).
 ## One root, several repositories
 
 A workspace is a directory that holds several clones and is not itself one. It
-declares three things and everything else follows:
+declares four things — an explicit root, a control repository, the declared
+repositories, and (when it releases) per-repository channels — and everything
+else follows:
 
 ```toml
 [project]
@@ -296,7 +299,8 @@ svc_a_test = { dir = "svc-a", run = "go test ./..." }
   the root is fine, an absolute path or a link that leaves the root is a warning
   with a bounded exemption.
 
-Omit `[workspace]` and you get exactly the single-repository behaviour of 0.3.x.
+Omit `[workspace]` and you get the single-repository behaviour: one root, one
+repository, no declared repositories.
 Details: [references/workspace.md](skills/lite-dev/references/workspace.md).
 
 ## Teams and multiple machines
@@ -312,7 +316,9 @@ parallel agent sessions:
   instead of merging it. A prefix that matches two items is an error with the
   candidates listed; the tool never guesses.
 - **Ownership is explicit.** `owner` is required and resolved from `--owner`,
-  `$LITE_DEV_OWNER`, or `git config lite-dev.owner` — never from `user.name`.
+  `$LITE_DEV_OWNER`, `git config lite-dev.owner`, or the project's
+  `[project] owner_file` when the root is not a repository — never from
+  `user.name`.
   `whoami` shows the value and its source; `claim` takes over an item and
   `status --mine` filters. Taking over someone's open item needs
   `--takeover --reason "..."`; closed items cannot be claimed and archived items

@@ -236,7 +236,7 @@ class UpgradeReviewTest(Base):
         self.assertEqual(code, 0, out + err)
         text = self.profile_text()
         self.assertIn('requires = ">=0.7.0,<1.0"', text)
-        self.assertIn('reviewed = "0.7.0"', text)
+        self.assertIn('reviewed = "0.7.1"', text)
         _, warnings = checks.check_project(self.load())
         self.assertFalse(any("minor ahead" in warning for warning in warnings))
 

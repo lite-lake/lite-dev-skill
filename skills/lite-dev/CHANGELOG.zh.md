@@ -2,12 +2,19 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
-## 未发布
+## 0.7.1 — 2026-11-27
+
+补丁版本：文档与门禁新鲜度修正，协议无变化。
+
+### 修复
+
+- `fresh_days = 0` 现在按模板注释“总是提示”生效；正数窗口仍包含当天。
 
 ### 变更
 
-- `.github/workflows/tests.yml` 也会跑 `scripts/tests`，镜像钩子「不重入自己的
-  dry run」这条护栏从此每次推送都被验证。
+- 文档口径修正：`--apply flow.requires` 的迁移说明、记账提交集合、
+  `clarify`/`check` 表述、身份来源、工作空间模型数量、security-scan 的严重级别说明、
+  发布记录文件名示例，均已与代码一致。
 
 ## 0.7.0 — 2026-11-27
 
@@ -41,6 +48,8 @@
 
 - `compat_range` 推导 `>=X.Y.0,<X+1.0`；补丁位不再抬高下界。
 - `status --json` 增加 `reviewed` 与 `drift`；pin 拒绝加载时用 `version` 诊断。
+- `.github/workflows/tests.yml` 也会跑 `scripts/tests`，镜像钩子「不重入自己的
+  dry run」这条护栏从此每次推送都被验证。
 
 ## 0.6.1 — 2026-11-27
 

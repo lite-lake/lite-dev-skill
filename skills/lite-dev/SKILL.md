@@ -124,7 +124,8 @@ python3 <skill>/scripts/flow.py extensions
 - `new` allocates `{date}-{type}-{time}` and creates
   `<work_dir>/<YYYY-MM>/<id>-<slug>/item.md`; the slug follows the title's script
   (Chinese stays Chinese, 30 characters max). It needs an identity (`--owner`,
-  `$LITE_DEV_OWNER`, or `git config lite-dev.owner`).
+  `$LITE_DEV_OWNER`, `git config lite-dev.owner`, or `[project] owner_file` for
+  a root that is not a repository).
 - `check` validates fields, AC, design rules, evidence, and document hygiene
   (links, reachability, counts, decisions, exemptions); `--work` limits it to
   one item. A partial test report is a warning while the item is open.
@@ -163,13 +164,16 @@ python3 <skill>/scripts/flow.py extensions
 - `whoami` prints the resolved identity and where it came from; run it on every
   machine.
 - `release` plans; `--record` runs the gate and writes the channel record. A
-  release that only adds records/archive commits is not debt; a clone behind its
-  upstream is refused, and an unfetched clone cannot be detected, so pull first.
+  commit that only touches the profile, work items, or release records is not
+  debt; a clone behind its upstream is refused, and an unfetched clone cannot be
+  detected, so pull first.
   `--confirmed-by` names the authorizer separately from the recorder.
 - `reconcile` reports commits that bypassed the flow; it never blocks. With no
   release record yet it uses `[reconcile] baseline` (or `--since`), so a project
-  that adopted the flow mid-history can see its debt; with neither it refuses and
-  names the fix. It labels record-only commits as bookkeeping, still flags risky
+  that adopted the flow mid-history can see its debt. With a channel configured
+  but no record it inspects the whole history; with no channel and no
+  baseline/`--since` it refuses and names the fix. It labels record-only commits
+  as bookkeeping, still flags risky
   paths that carry an item id, and knows archived item ids.
 - `extensions` shows what each enabled extension adds, including required docs
   and reconcile risk paths.
@@ -189,8 +193,8 @@ candidates listed: use the full id, never guess.
   point: a rollback answers "how do we undo it", confirmation answers "who
   said we may".
 - Commits without work items are allowed. Write the debt into `--note`; never
-  fabricate a work item to make the report green. Commits that only add release
-  records or archive a work item are bookkeeping, not debt. `## Work items`
+  fabricate a work item to make the report green. Commits that only touch the
+  profile, work items, or release records are bookkeeping, not debt. `## Work items`
   never claims an id that does not exist; it labels it `(missing)`.
 - `reconcile` is advisory and exits 0. It is not an approval gate. Two
   `risk_paths` lists exist: `[reconcile]` colours its report, `[design]` drives
@@ -209,8 +213,8 @@ Details: [references/extensions.md](references/extensions.md).
 
 The skill version itself uses the same contract: `requires` is the hard window,
 `reviewed` is the exact version this project last reconciled with, and a minor
-drift warns instead of blocking. `version` reports both; [upgrade.md](upgrade.md)
-has the review and the major checklist.
+drift warns instead of blocking. `version` reports both;
+[upgrade.md](references/upgrade.md) has the review and the major checklist.
 
 ## 6. Writing a design
 
@@ -360,6 +364,7 @@ the plan is not a default — it is the first list.
 - [Teams and machines](references/collaboration.md)
 - [Workspaces](references/workspace.md)
 - [Release channels](references/release-channels.md)
+- [Upgrade](references/upgrade.md)
 - [Reconcile](references/reconcile.md)
 - [Docs hygiene](references/docs-hygiene.md)
 - [Extensions](references/extensions.md)

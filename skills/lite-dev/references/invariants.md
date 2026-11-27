@@ -113,7 +113,7 @@ that teaches people to ignore the file.
   gate/smoke results, the configured artefacts, and a rollback target.
 - Records form one chain per channel; the watermark is the ancestry tip of that
   chain, not a filename or a local clock.
-- Commits that only add records, change the profile, or archive an item are
+- Commits that only touch the profile, the work store, or the release store are
   bookkeeping, not debt. Other commits without work items are recorded as adhoc
   debt; they are not blocked, but they cannot be skipped with `--since`.
 - `## Work items` names only existing (active or archived) items; an unknown id

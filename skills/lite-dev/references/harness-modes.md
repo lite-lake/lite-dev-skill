@@ -12,8 +12,10 @@ verifies. How you get them depends on the harness.
 - A subagent that returns nothing gets one retry with the same task, including
   when it fails for transport reasons; check that the tree holds no half-done
   work before resending, and pass the paths of what it already produced so the
-  retry does not start from zero. A second empty return stops the batch and asks;
-  do not reinterpret silence as success.
+  retry does not start from zero. If the retry also returns nothing, treat it as
+  a blockage: record it and continue the batches that do not need it; stop and
+  ask only when it blocks every remaining batch. Do not reinterpret silence as
+  success.
 
 ## Mode B: single context only
 

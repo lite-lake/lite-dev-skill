@@ -120,8 +120,9 @@ flow.py init --upgrade
 flow.py init --upgrade --apply flow.requires --apply flow.reviewed
 ```
 
-`--apply flow.requires` alone widens the window but leaves the review pending.
-A major crossing also needs `--accept-major`; the full checklist is in
+`--apply flow.requires` alone moves the window but leaves `reviewed` outside
+it, so the profile does not load until `flow.reviewed` is applied too. A major
+crossing also needs `--accept-major`; the full checklist is in
 [upgrade](upgrade.md). After the contract is current, run `init --plan` to wire
 commands, then `check`.
 

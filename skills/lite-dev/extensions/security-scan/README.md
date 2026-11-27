@@ -50,5 +50,7 @@ silenced everywhere.
   the only fix; removing the line is not enough.
 - The allowlist is project data. Turning the rule off for a whole language or
   directory is how this check stops finding anything.
-- The command prints findings and exits 1; a project that wants a warning
-  instead can append the step to `l2` rather than `l3` in its own copy.
+- The command prints findings and exits 1, so it fails whatever level runs it.
+  A project that wants the scan before commit can append the step to `l2` as
+  well as `l3`; that moves the failure earlier, it does not turn it into a
+  warning.

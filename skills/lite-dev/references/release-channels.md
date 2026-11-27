@@ -36,8 +36,9 @@ flow.py release --channel prod --record \
    cannot be detected, so pull first.
 4. The channel's records form one unbroken chain, and HEAD descends from its tip.
 5. `--rollback` is non-empty; `--artifact` is present when the profile requires it.
-6. Commits without work items must be listed in `--note`. Commits that only add
-   release records or archive an item are bookkeeping and need no note.
+6. Commits without work items must be listed in `--note`. Commits that only
+   touch the profile, work items, or release records are bookkeeping and need no
+   note.
 7. With `confirm_risk_paths`, a range that touches `[design] risk_paths` has
    `--confirm`; `--confirmed-by` names the authorizer when it is not the
    recorder. The record keeps the human's words verbatim.
@@ -113,9 +114,9 @@ index can never become a watermark and can never diverge from them. Losing it
 loses a summary, not evidence.
 
 The record is rendered from `templates/release.md`; headings and frontmatter
-keys are a parsing contract. The filename contains the date and the short
-source (`staging-20261031-a1b2c3.md`), so records from different machines do not
-collide. Commit the record before the next release; otherwise the working tree
+keys are a parsing contract. The filename contains the ISO date and the short
+source (`staging-2026-10-31-a1b2c3.md`), so records from different machines do
+not collide. Commit the record before the next release; otherwise the working tree
 is dirty and `--record` refuses to run.
 
 ## Promotion and rollback

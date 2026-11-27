@@ -49,7 +49,7 @@ work_dir = "docs/work"
 requires = ">=0.7.0,<1.0"
 # The exact version this project was last reconciled with. `init` writes it;
 # `init --upgrade --apply flow.reviewed` moves it after the review.
-reviewed = "0.7.0"
+reviewed = "0.7.1"
 
 [id]
 # {date} -> YYYYMMDD, {type} -> REQ/BUG/TD/OPS/IDEA, {time} -> 6 chars of

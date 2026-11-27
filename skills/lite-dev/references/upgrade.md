@@ -41,8 +41,10 @@ major crossing needs it. `drift` is one of `patch`, `minor`, `major`,
 6. Commit the profile with the change that needed the upgrade. The warning
    clears because `reviewed` now equals the running version.
 
-`--apply flow.requires` alone widens the window; the profile then loads but the
-warning remains. The tool prints a note when that is still pending.
+`--apply flow.requires` alone is not enough: `reviewed` would sit outside the
+new window, and `profile.load` rejects that, so the profile does not load until
+`flow.reviewed` is applied too. Applying only `flow.reviewed` leaves the old
+window in place; the tool prints a note while `flow.requires` is still pending.
 
 ## A major (X) check
 

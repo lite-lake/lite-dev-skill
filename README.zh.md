@@ -163,11 +163,12 @@ skills/lite-dev/            可安装的 skill，依赖全部在目录内
   references/               不变量 + 按情境加载的细则
                             （adoption.md 讲如何引入流程；
                             workspace.md 讲一个根多个仓库）
-  templates/                item / design / test-report / implementation / release / retro / decision
+  templates/                item / design / test-report / implementation / release /
+                            release-group / retro / decision
   extensions/               随 skill 分发的扩展（go-service、security-scan、deploy-lane）
   scripts/flow.py           init / new / claim / whoami / status / version / check /
                             design / design-ready / gate / done / drop / handoff /
-                            unarchive / release / reconcile / extensions
+                            archive / unarchive / release / reconcile / extensions
   scripts/flowlib/          profile、身份、产物解析、检查、文档卫生、门禁账本、
                             交接提示词、归档、命令执行、项目脚手架、接入阶梯与建议、
                             原子写入与写者锁
@@ -219,7 +220,7 @@ flow.py extensions                     # 每个扩展贡献了什么
 
 `--record` 会自己跑门禁，之前跑过不算证据。它会拒绝脏工作树、非 `release.mainline`
 分支、落后于上游的克隆、空的回滚说明、不是已记录 tip 后代的 source，以及没有写进
-`--note` 的无工作项提交。只新增发布记录或归档条目的提交是记账提交，不算欠账。profile
+`--note` 的无工作项提交。只改动 profile、工作项或发布记录的提交是记账提交，不算欠账。profile
 打开 `[release] confirm_risk_paths` 后，触及 `[design] risk_paths` 的发布范围还需要
 `--confirm`；当批准人不是记录人时用 `--confirmed-by` 点名。记录里会留下人的原话，
 而不只是回滚方案。
@@ -234,7 +235,8 @@ flow.py extensions                     # 每个扩展贡献了什么
 
 ## 一个根，多个仓库
 
-工作空间是一个容纳多个克隆、自身不是仓库的目录。它只声明三件事，其余随之工作：
+工作空间是一个容纳多个克隆、自身不是仓库的目录。它声明四件事——显式根目录、控制仓库、
+受管仓库，以及（需要发布时）按仓库绑定的发布频道——其余随之工作：
 
 ```toml
 [project]
@@ -267,8 +269,8 @@ svc_a_test = { dir = "svc-a", run = "go test ./..." }
   索引；根内部的跨仓链接是正常的，绝对路径或越出根的链接是警告，用「有期限的豁免」
   登记。
 
-不写 `[workspace]`，得到的就是 0.3.x 的单仓行为，一点不差。细节见
-[references/workspace.md](skills/lite-dev/references/workspace.md)。
+不写 `[workspace]`，得到的就是单仓库行为：一个根、一个仓库，没有受管仓库清单。
+细节见 [references/workspace.md](skills/lite-dev/references/workspace.md)。
 
 ## 团队与多台机器
 
@@ -279,8 +281,9 @@ svc_a_test = { dir = "svc-a", run = "go test ./..." }
   id，克隆可以独立分配，同一时区同一天内 id 按创建顺序排列。唯一残留的碰撞是两个
   创建者落在同一毫秒；`check` 会报重复而不合并。前缀命中两条时是错误并列出候选，
   工具从不猜。
-- **归属必须显式。** `owner` 必填，来源是 `--owner`、`$LITE_DEV_OWNER` 或
-  `git config lite-dev.owner`，绝不取 `user.name`。`whoami` 显示生效值和来源；
+- **归属必须显式。** `owner` 必填，来源是 `--owner`、`$LITE_DEV_OWNER`、
+  `git config lite-dev.owner`，根目录不是仓库时还可回退到 `[project] owner_file`，
+  绝不取 `user.name`。`whoami` 显示生效值和来源；
   `claim` 接管条目，`status --mine` 按人过滤。接管别人未关闭的条目需要
   `--takeover --reason "..."`；已关闭条目不能 claim，归档条目在 unarchive 前只读。
   `done` 需要身份并写入 `closed_by`，可选的 `[project] owners` 名单让 `check` 报出

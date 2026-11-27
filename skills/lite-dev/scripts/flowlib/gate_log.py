@@ -121,7 +121,8 @@ def stale_line(profile: Profile, level: str) -> str | None:
             f"`gate --level {level}` is the only evidence for it"
         )
     age = _age(str(record_found.get("date", "")))
-    if age is None or age <= profile.gate_fresh_days:
+    # fresh_days = 0 means "always advise"; a positive window includes today.
+    if age is None or (profile.gate_fresh_days and age <= profile.gate_fresh_days):
         return None
     return (
         f"{level} last passed {age} days ago (profile allows {profile.gate_fresh_days}); "

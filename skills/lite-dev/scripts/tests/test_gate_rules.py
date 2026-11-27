@@ -247,6 +247,15 @@ class GateRulesTest(GateCase):
         self.assertEqual(code, 0, output)
         self.assertIn("l3 last passed", output)
 
+    def test_zero_fresh_days_always_advises(self) -> None:
+        self.write(
+            "docs/flow/profile.toml",
+            PROFILE.replace("fresh_days = 5", "fresh_days = 0"),
+        )
+        profile = profile_mod.load(self.profile_path)
+        gate_log.record(profile, "l3", True)
+        self.assertIsNotNone(gate_log.stale_line(profile, "l3"))
+
 
 class FullLevelTest(GateCase):
     """`done` closes on the strictest defined level; say which one that is."""

@@ -2,12 +2,21 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
-## Unreleased
+## 0.7.1 — 2026-11-27
+
+A patch release: documentation and gate-freshness fixes; no protocol change.
+
+### Fixed
+
+- `fresh_days = 0` now always advises, matching the profile template; a
+  positive window still includes today.
 
 ### Changed
 
-- `.github/workflows/tests.yml` also runs `scripts/tests`, so the mirror hook's
-  guard against re-entering its own dry run is proven on every push.
+- Documentation corrections: the `--apply flow.requires` migration note, the
+  bookkeeping set, the `clarify`/`check` wording, identity sources, the
+  workspace model count, the security-scan severity note, and the
+  release-record filename example now match the code.
 
 ## 0.7.0 — 2026-11-27
 
@@ -50,6 +59,8 @@ against, and `version` answers what this install is.
   the floor.
 - `status --json` adds `reviewed` and `drift`; `version` is the diagnostic
   command when a pin refuses to load.
+- `.github/workflows/tests.yml` also runs `scripts/tests`, so the mirror hook's
+  guard against re-entering its own dry run is proven on every push.
 
 ## 0.6.1 — 2026-11-27
 
