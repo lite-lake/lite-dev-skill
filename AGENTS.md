@@ -20,6 +20,7 @@ every template.
 
    ```bash
    python3 -m unittest discover -s skills/lite-dev/scripts/tests -v
+   python3 -m unittest discover -s scripts/tests -v
    ```
 
    New parsing or derivation logic needs a test. The acceptance test runs the
@@ -40,12 +41,36 @@ every template.
    name the mechanisation candidate. An escape hatch is a record with a reason
    and an expiry (`[[exempt]]`), never a permanent switch.
 
+## Remotes
+
+`origin` (GitHub) is the only place history is written. `origin-cnb`
+(<https://cnb.cool/lite-lake/lite-dev-skill>) is a read-only replica that
+mainland-China users clone from. cnb does not sync from GitHub, so keeping the
+replica current is our job. It carries commits and tags; issues may be opened on
+either, but GitHub is where they get discussed.
+
+Enable the mirror once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+A push to `origin` then also updates `origin-cnb`, but only after a dry run
+against GitHub passes, so a push git would reject never moves the replica ahead.
+When cnb is unreachable the push stops with the repair spelled out rather than
+skipping quietly: `git push --no-verify` pushes GitHub alone, then
+`python3 scripts/push_mirror.py --sync` repairs the replica. `--sync` sends only
+refs GitHub has and prunes replica refs it does not; after GitHub's history is
+rewritten, `--sync --force` is the deliberate repair.
+
 ## Before you finish
 
 - Run the unit tests and the `examples/minimal` acceptance:
   `new → check → status → design-ready → gate → done`.
 - Update `CHANGELOG.md` **and** `CHANGELOG.zh.md`; note breaking changes
   explicitly. Same for `README.md` / `README.zh.md`.
+- `python3 scripts/push_mirror.py --check` passes: the cnb replica matches
+  `origin`.
 - Nothing is published before 1.0.0: change the protocol freely and keep both
   changelogs honest. From 1.0.0, a change to an invariant requires a major
   version bump and a breaking-change note.

@@ -2,6 +2,27 @@
 
 [English](CHANGELOG.md) | **简体中文**
 
+## 0.6.1 — 2026-11-27
+
+仓库多了一个只读的家：向 GitHub 推送时会顺带更新 cnb 副本，CI 负责证明两边一致。
+协议没有变化。
+
+### 新增
+
+- `scripts/push_mirror.py` 与 `.githooks/pre-push`：向 `origin` 推送时会顺带更新
+  只读的 cnb 副本，但先对 GitHub 做一次 dry run，被 git 拒绝的推送不会让副本跑到
+  GitHub 前面。`--check` 报告偏差，`--sync` 修复副本，`--sync --force` 处理 GitHub
+  历史被重写的情况。cnb 不可用时会停下并给出修复步骤，而不是悄悄跳过。
+- `.github/workflows/mirror.yml` 在每次推送时运行 `--check`。它不含任何密钥、也不
+  推送任何东西，唯一职责是让被跳过或失败的镜像同步变得可见。
+
+### 变更
+
+- `README.md` 给出中国大陆镜像 <https://cnb.cool/lite-lake/lite-dev-skill> 用于
+  克隆，并说明 issue 与 pull request 在 GitHub 上。仅文档改动，协议不变。
+- `AGENTS.md` 记录两个 remote 和一次性的 `core.hooksPath` 设置；单测命令也覆盖
+  `scripts/tests`。
+
 ## 0.6.0 — 2026-11-27
 
 批次现在可以声明自己是并行的；一条 AC 只验收一次，而不是每个碰到它的批次都验一遍；

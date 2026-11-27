@@ -8,6 +8,8 @@ write one profile, and an agent can run a change from clarification to recorded
 completion without inventing process.
 
 Repository: <https://github.com/lite-lake/lite-dev-skill>
+Mirror for mainland China: <https://cnb.cool/lite-lake/lite-dev-skill>
+(clone from either; issues and pull requests live on GitHub)
 
 - Single repository by default; a workspace of several repositories is one table away.
 - Zero install: Python 3.11+ standard library only (`tomllib`). No dependencies.
@@ -56,6 +58,7 @@ Three things make it different from a checklist:
 
    ```bash
    git clone https://github.com/lite-lake/lite-dev-skill.git
+   # mainland China: git clone https://cnb.cool/lite-lake/lite-dev-skill.git
    ```
 
 2. **Scaffold the project, then wire it.**

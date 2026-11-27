@@ -1,0 +1,27 @@
+name: mirror
+
+# The replica is kept in step by .githooks/pre-push, not here: this job only
+# proves the two remotes agree. It needs no secret and cannot publish, so a
+# mirror that was skipped (--no-verify) or failed (cnb unreachable) turns red
+# instead of going unnoticed.
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    if: github.repository == 'lite-lake/lite-dev-skill'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add the read-only replica
+        run: git remote add origin-cnb https://cnb.cool/lite-lake/lite-dev-skill
+
+      - name: Compare origin with the replica
+        run: python3 scripts/push_mirror.py --check

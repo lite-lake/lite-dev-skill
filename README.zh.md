@@ -7,6 +7,8 @@
 改动从澄清一路做到记录在案的收尾，而不必自己发明流程。
 
 仓库：<https://github.com/lite-lake/lite-dev-skill>
+中国大陆镜像：<https://cnb.cool/lite-lake/lite-dev-skill>
+（两边都可以克隆；issue 与 pull request 请到 GitHub）
 
 - 默认单仓库；多仓工作空间只差一张表。
 - 零安装：仅用 Python 3.11+ 标准库（`tomllib`），无第三方依赖。
@@ -51,6 +53,7 @@
 
    ```bash
    git clone https://github.com/lite-lake/lite-dev-skill.git
+   # 中国大陆：git clone https://cnb.cool/lite-lake/lite-dev-skill.git
    ```
 
 2. **生成骨架，然后接上门禁。**

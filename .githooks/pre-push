@@ -1,0 +1,17 @@
+#!/bin/sh
+# Mirror the refs being pushed to GitHub onto the read-only cnb replica.
+#
+# Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# A single push can skip it with `git push --no-verify`; repair the replica
+# afterwards with `python3 scripts/push_mirror.py --sync`. CI runs
+# `--check`, so a bypassed hook is visible rather than silent.
+
+command -v python3 >/dev/null 2>&1 || {
+    echo "pre-push: python3 is required to mirror to cnb (see AGENTS.md)" >&2
+    exit 1
+}
+
+root=$(git rev-parse --show-toplevel) || exit 0
+exec python3 "$root/scripts/push_mirror.py" hook "$@"

@@ -2,6 +2,31 @@
 
 **English** | [简体中文](CHANGELOG.zh.md)
 
+## 0.6.1 — 2026-11-27
+
+The repository has a second home: a push to GitHub also updates the read-only
+cnb replica, and CI proves the two agree. No protocol change.
+
+### Added
+
+- `scripts/push_mirror.py` and `.githooks/pre-push`: a push to `origin` also
+  updates the read-only cnb replica, but only after a dry run against GitHub
+  passes, so a push git would reject never moves the replica ahead. `--check`
+  reports drift, `--sync` repairs the replica, and `--sync --force` recovers a
+  rewritten origin. A cnb outage stops the push with the repair spelled out
+  instead of skipping quietly.
+- `.github/workflows/mirror.yml` runs `--check` on every push. It carries no
+  secret and pushes nothing; its only job is to make a skipped or failed mirror
+  visible.
+
+### Changed
+
+- `README.md` names the mainland-China mirror at
+  <https://cnb.cool/lite-lake/lite-dev-skill> for cloning, and says issues and
+  pull requests live on GitHub. Documentation only; the protocol is unchanged.
+- `AGENTS.md` documents the two remotes and the one-time `core.hooksPath`
+  setup; the unit test command now covers `scripts/tests` as well.
+
 ## 0.6.0 — 2026-11-27
 
 A batch can say it runs in parallel, an AC is accepted once instead of in every
